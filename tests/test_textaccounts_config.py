@@ -1,0 +1,98 @@
+import json
+from pathlib import Path
+
+import pytest
+
+from textaccounts.config import (
+    Profile,
+    ProfileRegistry,
+    extract_email,
+    load_registry,
+    save_registry,
+)
+
+
+def test_registry_round_trip(tmp_path):
+    config_path = tmp_path / "profiles.yaml"
+    profiles_dir = tmp_path / "profiles"
+
+    registry = ProfileRegistry(
+        active="work",
+        profiles={
+            "work": Profile(
+                name="work",
+                path=tmp_path / "claude-work",
+                email="pau***@example.com",
+                adopted="2026-04-12T10:00:00Z",
+                worker=False,
+            ),
+            "work-worker": Profile(
+                name="work-worker",
+                path=tmp_path / "claude-profiles" / "work-worker",
+                email="pau***@example.com",
+                worker=True,
+                parent="work",
+            ),
+        },
+        profiles_dir=profiles_dir,
+    )
+
+    save_registry(registry, config_path=config_path)
+    loaded = load_registry(config_path=config_path)
+
+    assert loaded.active == "work"
+    assert set(loaded.profiles) == {"work", "work-worker"}
+
+    work = loaded.profiles["work"]
+    assert work.path == tmp_path / "claude-work"
+    assert work.email == "pau***@example.com"
+    assert work.adopted == "2026-04-12T10:00:00Z"
+    assert work.worker is False
+    assert work.parent is None
+
+    worker = loaded.profiles["work-worker"]
+    assert worker.worker is True
+    assert worker.parent == "work"
+
+    assert loaded.profiles_dir == profiles_dir
+
+
+def test_load_missing_file_returns_empty(tmp_path):
+    config_path = tmp_path / "nonexistent.yaml"
+    registry = load_registry(config_path=config_path)
+
+    assert registry.active is None
+    assert registry.profiles == {}
+
+
+def test_extract_email_masks_correctly(tmp_path):
+    claude_json = tmp_path / ".claude.json"
+    claude_json.write_text(
+        json.dumps({"oauthAccount": {"emailAddress": "paolo.d@example.com"}})
+    )
+
+    result = extract_email(tmp_path)
+    assert result == "pao***@example.com"
+
+
+def test_extract_email_short_local_not_masked(tmp_path):
+    claude_json = tmp_path / ".claude.json"
+    claude_json.write_text(
+        json.dumps({"oauthAccount": {"emailAddress": "ab@example.com"}})
+    )
+
+    result = extract_email(tmp_path)
+    assert result == "ab@example.com"
+
+
+def test_extract_email_missing_file_returns_empty(tmp_path):
+    result = extract_email(tmp_path)
+    assert result == ""
+
+
+def test_extract_email_missing_field_returns_empty(tmp_path):
+    claude_json = tmp_path / ".claude.json"
+    claude_json.write_text(json.dumps({"someOtherKey": {}}))
+
+    result = extract_email(tmp_path)
+    assert result == ""
