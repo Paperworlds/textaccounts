@@ -1,0 +1,78 @@
+id: "004"
+title: "Integrate textaccounts into textsessions"
+repo: textsessions
+model: sonnet
+phase: textaccounts
+budget_usd: 1.50
+depends_on: ["003"]
+
+context: |
+  textaccounts is now a working standalone CLI. This task wires it into
+  textsessions, completely replacing cloak. There is no cloak fallback —
+  textaccounts is the only profile mechanism.
+
+  Current state of src/textsessions/profiles.py:
+  - cloak_available(), cloak_profile_dir(), list_cloak_profiles(), cloak_version()
+  - aiproxy_available(), aiproxy_running()
+  - build_launch_env() — injects CLAUDE_CONFIG_DIR from cloak profiles
+  - resume_cmd() — builds argv for session resume
+
+  Current state of src/textsessions/config.py:
+  - IntegrationsConfig(cloak=True, aiproxy=True)
+
+  Current state of src/textsessions/cli.py lines 116-265:
+  - profile group with status/list/setup/check subcommands (all cloak-specific)
+
+  Plan:
+  1. Delete all cloak functions from profiles.py; add textaccounts functions
+  2. build_launch_env: textaccounts only, no cloak branch
+  3. IntegrationsConfig: remove cloak, add textaccounts
+  4. Remove the profile group from cli.py (textaccounts CLI handles this now)
+  5. Replace all cloak tests with textaccounts tests
+
+steps:
+  - name: profiles-detection
+    do: >
+      In src/textsessions/profiles.py:
+      - DELETE cloak_available(), cloak_profile_dir(), list_cloak_profiles(), cloak_version() entirely
+      - Add textaccounts_available() -> bool: check ~/.textaccounts/profiles.yaml exists
+      - Add textaccounts_profile_dir(profile: str) -> Path | None: load ~/.textaccounts/profiles.yaml,
+        look up profile by name, return its path
+      - Add list_textaccounts_profiles() -> list[str]: return profile names from registry
+      - Rewrite build_launch_env(): use textaccounts only (no cloak branch). If textaccounts
+        unavailable or profile not found, set no CLAUDE_CONFIG_DIR override.
+        Keep aiproxy logic unchanged.
+      Do NOT import from textaccounts package — read the YAML directly to avoid circular deps.
+    check: "build_launch_env resolves profiles from textaccounts config"
+
+  - name: config-update
+    do: >
+      In src/textsessions/config.py, update IntegrationsConfig:
+      - Remove cloak: bool field entirely
+      - Add textaccounts: bool = True
+    check: "IntegrationsConfig has textaccounts field, no cloak field, load/save round-trips"
+
+  - name: remove-profile-group
+    do: >
+      In src/textsessions/cli.py, remove the entire profile group (lines 116-265):
+      - Remove @main.group("profile") and profile_group function
+      - Remove profile_status, profile_list, profile_setup, profile_check commands
+      - Remove any imports only used by the profile group
+      Do NOT remove anything else from cli.py.
+    check: "textsessions --help no longer shows 'profile' subcommand"
+
+  - name: update-tests
+    do: >
+      Rewrite tests/test_profiles.py from scratch (delete all 18 cloak tests):
+      - Test textaccounts_available returns True when ~/.textaccounts/profiles.yaml exists
+      - Test textaccounts_available returns False when file missing
+      - Test textaccounts_profile_dir finds correct path for registered profile
+      - Test textaccounts_profile_dir returns None for unknown profile
+      - Test build_launch_env sets CLAUDE_CONFIG_DIR when profile found
+      - Test build_launch_env sets nothing when textaccounts unavailable
+      - Keep aiproxy tests unchanged
+      Use tmp_path and monkeypatch to override the config path (not real ~/.textaccounts/).
+    check: "pytest tests/test_profiles.py passes"
+
+  - name: commit
+    do: "Commit and push"

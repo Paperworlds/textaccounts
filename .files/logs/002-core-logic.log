@@ -1,0 +1,15 @@
+Done. Here's what was delivered:
+
+**`src/textaccounts/core.py`** — all 8 functions:
+- `validate_config_dir` — checks `.claude.json` exists
+- `adopt` — registers an existing dir as a profile
+- `create_from_current` — copies `CLAUDE_CONFIG_DIR` (or `~/.claude`) into `profiles_dir/<name>/`, then adopts
+- `create_worker` — copies only `.claude.json` + `settings.json` from a parent profile, marks `worker=True`
+- `switch` — updates active, returns fish `set -gx` line; `"default"` returns `set -e` without touching registry
+- `get_status` — active profile info + `CLAUDE_CONFIG_DIR` env cross-check
+- `list_profiles` — all profiles with name, path, email, worker, dir size, active flag
+- `count_sessions` — counts dirs under `path/projects/`
+
+**`tests/test_textaccounts_core.py`** — 9 tests covering all specified behaviours.
+
+**`pyproject.toml`** — added `[tool.pytest.ini_options] pythonpath = ["src"]`, which was missing and blocked all textaccounts test imports.

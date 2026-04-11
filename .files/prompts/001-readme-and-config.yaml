@@ -1,0 +1,68 @@
+id: "001"
+title: "Create textaccounts README and config module"
+repo: textsessions
+model: sonnet
+phase: textaccounts
+budget_usd: 1.50
+depends_on: []
+
+context: |
+  textaccounts is a new sibling package inside the textsessions repo at
+  src/textaccounts/. It manages Claude Code account profiles by pointing
+  CLAUDE_CONFIG_DIR at full config directories.
+
+  This task creates the foundation: README.md with motivation and design,
+  __init__.py with version, and config.py with the ProfileRegistry dataclass
+  and YAML load/save.
+
+  Config file location: ~/.textaccounts/profiles.yaml
+  Default profiles dir: ~/.textaccounts/profiles/
+
+  Profile schema (each entry):
+    path: absolute path to a Claude config dir
+    email: cached from .claude.json -> oauthAccount.emailAddress (masked)
+    adopted: ISO timestamp
+    worker: bool (default false)
+    parent: str (only if worker, names the source profile)
+
+  See features/textaccounts/LEAD.md for the full cloak comparison table
+  and config schema.
+
+  Dependencies: click, pyyaml (already in textsessions deps).
+
+steps:
+  - name: init-package
+    do: "Create src/textaccounts/__init__.py with __version__ = '0.1.0'"
+    check: "File exists and is importable"
+
+  - name: readme
+    do: >
+      Create src/textaccounts/README.md with: motivation (why not cloak),
+      the cloak vs textaccounts comparison table from LEAD.md, design decisions
+      (full dirs not 2 files, YAML not TOML, adopt over create, fish native),
+      CLI reference, config schema example, and migration guide (adopt existing dirs).
+    check: "README covers motivation, comparison, CLI reference, config schema, migration"
+
+  - name: config-module
+    do: >
+      Create src/textaccounts/config.py with:
+      - Profile dataclass (name, path, email, adopted, worker, parent)
+      - ProfileRegistry dataclass (active, profiles dict, profiles_dir)
+      - load_registry() -> ProfileRegistry (reads YAML, returns empty if missing)
+      - save_registry(registry) (writes YAML, creates parent dirs)
+      - extract_email(config_dir: Path) -> str (reads .claude.json oauthAccount.emailAddress, masks middle)
+      Config path: ~/.textaccounts/profiles.yaml
+    check: "load_registry round-trips with save_registry; extract_email masks correctly"
+
+  - name: tests
+    do: >
+      Create tests/test_textaccounts_config.py with tests:
+      - registry round-trip (save then load)
+      - load missing file returns empty registry
+      - extract_email reads and masks correctly
+      - extract_email returns empty string for missing .claude.json
+      Use tmp_path fixture, never touch real ~/.claude* paths.
+    check: "pytest tests/test_textaccounts_config.py passes"
+
+  - name: commit
+    do: "Commit and push"

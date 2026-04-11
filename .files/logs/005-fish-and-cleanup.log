@@ -1,0 +1,35 @@
+Perfect! Task 005 is complete. Here's a summary:
+
+## ✅ Task Complete: Add Fish Shell Integration and Clean Up Cloak Docs
+
+All four steps completed successfully:
+
+1. **Fish Function & Completions** ✓
+   - Created `completions/ta.fish` with the `ta` wrapper function
+   - Evals `textaccounts switch` output to set `CLAUDE_CONFIG_DIR` in the parent shell
+   - Full bash completions for commands and dynamic profile names from `~/.textaccounts/profiles.yaml`
+
+2. **Documentation** ✓
+   - Deleted `docs/cloak-setup.md` (cloak fully replaced)
+   - Created `docs/textaccounts.md` with quick-start guide
+   - Points to full documentation in `src/textaccounts/README.md`
+
+3. **Feature Map** ✓
+   - Replaced "Cloak Integration" (experimental) with "Native Profile Management (textaccounts)"
+   - Updated use cases and description
+
+4. **Commit & Push** ✓
+   - Commit `7e7a4b7` pushed to main
+   - Clean, documented commit message
+
+**Files created:**
+- `completions/ta.fish` (80 lines)
+- `docs/textaccounts.md` (quick-start guide)
+
+**Files deleted:**
+- `docs/cloak-setup.md`
+
+**Files updated:**
+- `docs/features.yaml` (cloak → textaccounts)
+
+The `ta` function is ready for users — they just need to source `completions/ta.fish` in `~/.config/fish/config.fish`.

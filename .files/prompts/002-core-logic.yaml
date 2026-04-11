@@ -1,0 +1,58 @@
+id: "002"
+title: "Implement textaccounts core logic"
+repo: textsessions
+model: sonnet
+phase: textaccounts
+budget_usd: 1.50
+depends_on: ["001"]
+
+context: |
+  src/textaccounts/config.py exists with ProfileRegistry, Profile, load/save,
+  and extract_email. Now implement the business logic in core.py.
+
+  Key design: "adopt" is the primary path — users already have dirs like
+  ~/.claude-work/ and ~/.claude-personal/. No data moves.
+
+  "create" snapshots the current CLAUDE_CONFIG_DIR (or ~/.claude/) into
+  the configured profiles_dir. "create --worker" copies only .claude.json
+  and settings.json from a parent profile.
+
+  "switch" updates the active field in the registry and returns a fish
+  shell command string to stdout (set -gx CLAUDE_CONFIG_DIR <path>).
+  "default" is a sentinel name (not a registered profile) meaning "unset
+  the override" — returns set -e CLAUDE_CONFIG_DIR without touching the registry.
+
+  A valid Claude config dir must contain .claude.json at minimum.
+
+steps:
+  - name: core-module
+    do: >
+      Create src/textaccounts/core.py with functions:
+      - validate_config_dir(path: Path) -> bool: check .claude.json exists
+      - adopt(name, path, registry) -> Profile: validate dir, extract email, add to registry
+      - create_from_current(name, registry) -> Profile: copy current config dir to profiles_dir/<name>/, adopt result
+      - create_worker(name, parent_name, registry) -> Profile: copy only .claude.json + settings.json from parent profile path, mark worker=True
+      - switch(name, registry) -> str: set active, return fish env line
+      - get_status(registry) -> dict: active profile info, cross-check with CLAUDE_CONFIG_DIR env var
+      - list_profiles(registry) -> list[dict]: all profiles with name, path, email, worker flag, dir size
+      - count_sessions(path) -> int: count dirs under path/projects/
+      Raise click.UsageError for validation failures (duplicate name, missing dir, etc.)
+    check: "All functions importable and type-correct"
+
+  - name: tests
+    do: >
+      Create tests/test_textaccounts_core.py with tests:
+      - adopt registers profile and extracts email
+      - adopt rejects dir without .claude.json
+      - adopt rejects duplicate name
+      - create_from_current copies full directory
+      - create_worker copies only .claude.json and settings.json
+      - switch returns correct fish env line
+      - switch to "default" returns set -e line
+      - switch updates active in registry
+      - list_profiles returns all profiles
+      Use tmp_path, create fake .claude.json files with oauthAccount.emailAddress.
+    check: "pytest tests/test_textaccounts_core.py passes"
+
+  - name: commit
+    do: "Commit and push"

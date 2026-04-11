@@ -1,0 +1,47 @@
+id: "005"
+title: "Add fish shell integration and clean up cloak docs"
+repo: textsessions
+model: haiku
+phase: textaccounts
+budget_usd: 0.50
+depends_on: ["004"]
+
+context: |
+  textaccounts is fully working and integrated with textsessions.
+  Cloak is gone entirely — textaccounts is the only profile mechanism.
+  This task adds fish shell completions, the ta wrapper function,
+  and removes the cloak docs.
+
+  The ta fish function is critical: textaccounts switch prints a fish
+  env line to stdout, and ta evals it so CLAUDE_CONFIG_DIR gets set
+  in the user's shell.
+
+  docs/cloak-setup.md should be deleted (not replaced).
+  Profile completions read ~/.textaccounts/profiles.yaml.
+
+steps:
+  - name: fish-function
+    do: >
+      Create completions/ta.fish with:
+      - ta function that wraps textaccounts, evals switch output
+      - Fish completions for textaccounts commands (adopt, create, list, switch, status)
+      - Complete profile names for switch by reading ~/.textaccounts/profiles.yaml
+    check: "source completions/ta.fish && ta --help works in fish"
+
+  - name: remove-cloak-docs
+    do: >
+      Delete docs/cloak-setup.md.
+      Create docs/textaccounts.md that:
+      - Points to src/textaccounts/README.md for full docs
+      - Covers quick-start: install, adopt existing dirs, ta switch
+      - No mention of cloak or cloak fallback
+    check: "docs/textaccounts.md exists, docs/cloak-setup.md deleted"
+
+  - name: update-features-yaml
+    do: >
+      In docs/features.yaml, remove the "Cloak Integration" entry and add
+      a "textaccounts" entry describing native profile management.
+    check: "features.yaml has textaccounts entry, no cloak entry"
+
+  - name: commit
+    do: "Commit and push"

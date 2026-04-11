@@ -1,0 +1,8 @@
+[2026-04-11T12:11:54Z] STEP 1/4: fish-function — Starting
+[2026-04-11T12:12:06Z] STEP 1/4: fish-function — PASS [completions/ta.fish created with function and profile completions]
+[2026-04-11T12:12:08Z] STEP 2/4: remove-cloak-docs — Starting
+[2026-04-11T12:12:17Z] STEP 2/4: remove-cloak-docs — PASS [docs/cloak-setup.md deleted, docs/textaccounts.md created]
+[2026-04-11T12:12:20Z] STEP 3/4: update-features-yaml — Starting
+[2026-04-11T12:12:25Z] STEP 3/4: update-features-yaml — PASS [Cloak Integration replaced with textaccounts entry]
+[2026-04-11T12:12:27Z] STEP 4/4: commit — Starting
+[2026-04-11T12:12:59Z] STEP 4/4: commit — PASS [Commit 7e7a4b7 pushed to main]

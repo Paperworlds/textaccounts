@@ -1,0 +1,10 @@
+Done. Here's what was created:
+
+| File | Description |
+|---|---|
+| `src/textaccounts/__init__.py` | Package with `__version__ = '0.1.0'` |
+| `src/textaccounts/config.py` | `Profile`, `ProfileRegistry`, `load_registry`, `save_registry`, `extract_email` |
+| `src/textaccounts/README.md` | Motivation, cloak comparison, design decisions, CLI ref, schema, migration guide |
+| `tests/test_textaccounts_config.py` | 6 tests — all pass |
+
+**Side fix:** `pytest` wasn't in `pyproject.toml` dev dependencies, so `uv run pytest` was silently falling back to Homebrew's Python 3.11 pytest. Added `pytest>=9.0.3` to `[dependency-groups].dev` so the venv's Python 3.14 runs the tests correctly. Committed `9f30e19`, pushed.

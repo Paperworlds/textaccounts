@@ -1,0 +1,9 @@
+Done. Here's what was delivered:
+
+**Step 1 — `src/textaccounts/cli.py`**: click group with 5 commands (`adopt`, `create`, `list`, `switch`, `status`). `switch` uses `click.echo` for plain stdout; all others use Rich console. `[worker]` tag escaped as `\[worker]` to prevent Rich stripping it.
+
+**Step 2 — `pyproject.toml`**: Added `textaccounts = "textaccounts.cli:main"` entry point (packages list already included `src/textaccounts`).
+
+**Step 3 — `tests/test_textaccounts_cli.py`**: 9 tests using `CliRunner`, monkeypatching `textaccounts.cli.load_registry`. All pass in 0.08s.
+
+**Step 4**: Committed (`b1d9680`) and pushed.

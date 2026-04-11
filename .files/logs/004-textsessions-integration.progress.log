@@ -1,0 +1,6 @@
+[2026-04-11T11:54:52Z] STEP 0/5: init — PASS [progress log created]
+[2026-04-11T11:55:47Z] STEP 1/5: profiles-detection — PASS [rewrote profiles.py: removed cloak, added textaccounts_available/profile_dir/list, rewrote build_launch_env]
+[2026-04-11T11:56:03Z] STEP 2/5: config-update — PASS [IntegrationsConfig: removed cloak, added textaccounts=True; updated load/save]
+[2026-04-11T11:56:36Z] STEP 3/5: remove-profile-group — PASS [removed profile group and all subcommands from cli.py]
+[2026-04-11T11:57:55Z] STEP 4/5: update-tests — PASS [14 new textaccounts profile tests pass; aiproxy tests preserved; cloak tests removed]
+[2026-04-11T11:58:17Z] STEP 5/5: commit — PASS [7a29c7f feat: replace cloak with textaccounts for profile management]

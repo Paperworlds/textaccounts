@@ -1,0 +1,59 @@
+id: "003"
+title: "Implement textaccounts CLI entry point"
+repo: textsessions
+model: sonnet
+phase: textaccounts
+budget_usd: 1.50
+depends_on: ["002"]
+
+context: |
+  src/textaccounts/config.py and src/textaccounts/core.py exist with all
+  business logic. Now wire them into a click CLI.
+
+  The CLI must match textsessions conventions: click groups, Rich console
+  for formatted output, Rich tables for list output.
+
+  Commands:
+    textaccounts adopt <name> <path>
+    textaccounts create <name> [--worker] [--from <parent>]
+    textaccounts list
+    textaccounts switch <name>
+    textaccounts status
+
+  "switch" is special: it prints a fish shell line to stdout (no Rich
+  formatting) so it can be eval'd by the ta fish function.
+
+  Entry point in pyproject.toml: textaccounts = "textaccounts.cli:main"
+
+steps:
+  - name: cli-module
+    do: >
+      Create src/textaccounts/cli.py with click group and commands:
+      - adopt: takes name + path args, calls core.adopt, prints confirmation with Rich
+      - create: takes name arg, --worker flag, --from option, calls create_from_current or create_worker
+      - list: calls list_profiles, renders Rich table (*, name, path, email, size, [worker] tag)
+      - switch: takes name arg, calls core.switch, prints ONLY the fish env line to stdout (no Rich)
+      - status: calls get_status, renders with Rich (active profile, dir, email, session count, env var check)
+      Add --version option showing textaccounts.__version__.
+    check: "textaccounts --help shows all 5 commands"
+
+  - name: pyproject
+    do: >
+      Edit pyproject.toml:
+      1. Add entry point: textaccounts = "textaccounts.cli:main" under [project.scripts]
+      2. Add "src/textaccounts" to [tool.hatch.build.targets.wheel] packages list
+    check: "pip install -e . succeeds and 'textaccounts --help' works from shell"
+
+  - name: tests
+    do: >
+      Create tests/test_textaccounts_cli.py using click.testing.CliRunner:
+      - test adopt prints confirmation
+      - test list shows table
+      - test switch outputs only fish env line (no Rich markup)
+      - test status shows active info
+      - test create --worker --from creates minimal profile
+      Use tmp_path with monkeypatch to override config paths.
+    check: "pytest tests/test_textaccounts_cli.py passes"
+
+  - name: commit
+    do: "Commit and push"

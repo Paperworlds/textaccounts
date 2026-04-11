@@ -1,0 +1,10 @@
+Done. Commit `7a29c7f` pushed.
+
+**What changed:**
+
+- **`profiles.py`**: Deleted all 4 cloak functions; added `textaccounts_available()`, `textaccounts_profile_dir()`, `list_textaccounts_profiles()` (reads `~/.textaccounts/profiles.yaml` directly via yaml, no package import). `build_launch_env()` now uses the `"textaccounts"` key instead of `"cloak"`.
+- **`config.py`**: `IntegrationsConfig.cloak` → `textaccounts: bool = True`; load/save updated accordingly.
+- **`cli.py`**: Removed the entire `profile` group (150+ lines, 4 subcommands).
+- **`tests/test_profiles.py`**: 18 cloak tests replaced with 14 textaccounts tests; aiproxy tests preserved. All 14 pass.
+
+**One callsite to watch:** anything passing `{"cloak": True}` to `build_launch_env()` won't activate the profile override — needs to use `{"textaccounts": True}` instead. The main caller is `tui/app.py` via `integrations_enabled` dict from `IntegrationsConfig` — that's already updated since the dataclass field changed.
