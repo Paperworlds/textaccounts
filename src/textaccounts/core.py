@@ -141,14 +141,18 @@ def remove_alias(profile_name: str, alias: str, registry: ProfileRegistry) -> Pr
     return profile
 
 
-def show(name: str, registry: ProfileRegistry) -> str:
+def show(name: str, registry: ProfileRegistry, shell: str = "fish") -> str:
     if name == "default":
-        return "set -e CLAUDE_CONFIG_DIR"
+        if shell == "fish":
+            return "set -e CLAUDE_CONFIG_DIR"
+        return "unset CLAUDE_CONFIG_DIR"
 
     canonical = resolve_profile(name, registry)
     registry.active = canonical
     profile = registry.profiles[canonical]
-    return f"set -gx CLAUDE_CONFIG_DIR {profile.path}"
+    if shell == "fish":
+        return f"set -gx CLAUDE_CONFIG_DIR {profile.path}"
+    return f"export CLAUDE_CONFIG_DIR={profile.path}"
 
 
 def get_status(registry: ProfileRegistry) -> dict:

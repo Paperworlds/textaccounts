@@ -116,10 +116,12 @@ def alias(profile_name: str, alias: str, remove: bool) -> None:
 
 @main.command()
 @click.argument("name")
-def show(name: str) -> None:
+@click.option("--shell", "shell_name", default="fish", hidden=True,
+              help="Shell syntax to emit (fish, bash, zsh).")
+def show(name: str, shell_name: str) -> None:
     """Print the shell command to activate a profile (used by shell integration)."""
     registry = load_registry()
-    line = core.show(name, registry)
+    line = core.show(name, registry, shell=shell_name)
     if name != "default":
         save_registry(registry)
     click.echo(line)
@@ -162,7 +164,7 @@ _FISH_FUNCTION = """\
 
 function textaccounts --description "Manage Claude Code profiles"
     if test (count $argv) -ge 1; and test "$argv[1]" = "switch"
-        eval (command textaccounts show $argv[2..-1])
+        eval (command textaccounts show --shell fish $argv[2..-1])
     else
         command textaccounts $argv
     end
@@ -205,7 +207,7 @@ complete -c textaccounts -n "__fish_seen_subcommand_from create" -f
 complete -c textaccounts -n "__fish_seen_subcommand_from create" -l worker -d "Create worker profile"
 complete -c textaccounts -n "__fish_seen_subcommand_from create" -l from -d "Parent profile"
 
-complete -c textaccounts -n "__fish_seen_subcommand_from install" -l shell -d "Shell type" -a "fish"
+complete -c textaccounts -n "__fish_seen_subcommand_from install" -l shell -d "Shell type" -a "fish bash zsh"
 """
 
 _FISH_TA_FUNCTION = """\
@@ -224,26 +226,132 @@ _FISH_TA_COMPLETIONS = """\
 complete -c ta --wraps textaccounts
 """
 
+# -- Bash / Zsh templates ---------------------------------------------------
+
+_BASH_FUNCTION = """\
+# textaccounts — shell integration
+# Wraps the Python CLI so that `textaccounts switch` sets CLAUDE_CONFIG_DIR
+# in the current shell. All other subcommands pass through.
+# Installed by: textaccounts install
+# Source this from ~/.bashrc
+
+textaccounts() {
+    if [ "$1" = "switch" ]; then
+        eval "$(command textaccounts show --shell bash "${@:2}")"
+    else
+        command textaccounts "$@"
+    fi
+}
+
+ta() { textaccounts "$@"; }
+"""
+
+_BASH_COMPLETIONS = """\
+# textaccounts completions for bash
+# Installed by: textaccounts install
+# Source this from ~/.bashrc
+
+_textaccounts_profiles() {
+    if [ -f ~/.textaccounts/profiles.yaml ]; then
+        grep -E '^  [a-zA-Z0-9_-]+:' ~/.textaccounts/profiles.yaml | sed 's/^[[:space:]]*//; s/:.*$//' 2>/dev/null
+    fi
+}
+
+_textaccounts_complete() {
+    local cur prev cmds
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+    cmds="adopt alias create install list rename show status switch view"
+
+    if [ "$COMP_CWORD" -eq 1 ]; then
+        COMPREPLY=( $(compgen -W "$cmds" -- "$cur") )
+    elif [ "$prev" = "switch" ] || [ "$prev" = "show" ]; then
+        local profiles
+        profiles="$(_textaccounts_profiles) default"
+        COMPREPLY=( $(compgen -W "$profiles" -- "$cur") )
+    fi
+}
+
+complete -F _textaccounts_complete textaccounts
+complete -F _textaccounts_complete ta
+"""
+
+_ZSH_FUNCTION = """\
+# textaccounts — shell integration
+# Wraps the Python CLI so that `textaccounts switch` sets CLAUDE_CONFIG_DIR
+# in the current shell. All other subcommands pass through.
+# Installed by: textaccounts install
+# Source this from ~/.zshrc
+
+textaccounts() {
+    if [[ "$1" == "switch" ]]; then
+        eval "$(command textaccounts show --shell zsh "${@:2}")"
+    else
+        command textaccounts "$@"
+    fi
+}
+
+ta() { textaccounts "$@"; }
+"""
+
+_ZSH_COMPLETIONS = """\
+# textaccounts completions for zsh
+# Installed by: textaccounts install
+# Source this from ~/.zshrc
+
+_textaccounts_profiles() {
+    if [[ -f ~/.textaccounts/profiles.yaml ]]; then
+        grep -E '^  [a-zA-Z0-9_-]+:' ~/.textaccounts/profiles.yaml | sed 's/^[[:space:]]*//; s/:.*$//' 2>/dev/null
+    fi
+}
+
+_textaccounts() {
+    local -a cmds profiles
+    cmds=(adopt alias create install list rename show status switch view)
+
+    if (( CURRENT == 2 )); then
+        _describe 'command' cmds
+    elif [[ "${words[2]}" == "switch" || "${words[2]}" == "show" ]]; then
+        profiles=($(_textaccounts_profiles) default)
+        _describe 'profile' profiles
+    fi
+}
+
+compdef _textaccounts textaccounts
+compdef _textaccounts ta
+"""
+
 
 @main.command()
-@click.option("--shell", "shell_name", default=None, help="Shell to install for (default: auto-detect).")
+@click.option("--shell", "shell_name", default=None,
+              type=click.Choice(["fish", "bash", "zsh"]),
+              help="Shell to install for (default: auto-detect).")
 def install(shell_name: str | None) -> None:
-    """Install shell integration (function + completions)."""
+    """Install shell integration (function + completions + ta alias)."""
     import os
 
     if shell_name is None:
         login_shell = os.environ.get("SHELL", "")
         if "fish" in login_shell:
             shell_name = "fish"
+        elif "zsh" in login_shell:
+            shell_name = "zsh"
+        elif "bash" in login_shell:
+            shell_name = "bash"
         else:
             raise click.UsageError(
                 f"Could not auto-detect shell (SHELL={login_shell}). "
-                "Pass --shell fish explicitly."
+                "Pass --shell explicitly."
             )
 
-    if shell_name != "fish":
-        raise click.UsageError(f"Unsupported shell: {shell_name}. Only 'fish' is supported.")
+    if shell_name == "fish":
+        _install_fish()
+    elif shell_name in ("bash", "zsh"):
+        _install_posix(shell_name)
 
+
+def _install_fish() -> None:
     fish_fn_dir = Path.home() / ".config" / "fish" / "functions"
     fish_comp_dir = Path.home() / ".config" / "fish" / "completions"
     fish_fn_dir.mkdir(parents=True, exist_ok=True)
@@ -263,3 +371,24 @@ def install(shell_name: str | None) -> None:
     console.print(f"[green]Installed[/green] completions  → {comp_path}")
     console.print(f"[green]Installed[/green] ta alias     → {ta_fn_path}")
     console.print(f"\nOpen a new shell or run: [bold]source {fn_path}[/bold]")
+
+
+def _install_posix(shell_name: str) -> None:
+    ta_dir = Path.home() / ".textaccounts"
+    ta_dir.mkdir(parents=True, exist_ok=True)
+
+    if shell_name == "zsh":
+        fn_content = _ZSH_FUNCTION
+        comp_content = _ZSH_COMPLETIONS
+        rc_file = "~/.zshrc"
+    else:
+        fn_content = _BASH_FUNCTION
+        comp_content = _BASH_COMPLETIONS
+        rc_file = "~/.bashrc"
+
+    fn_path = ta_dir / f"shell.{shell_name}"
+    fn_path.write_text(fn_content + "\n" + comp_content)
+
+    console.print(f"[green]Installed[/green] {shell_name} integration → {fn_path}")
+    console.print(f"\nAdd this to {rc_file}:")
+    console.print(f'  [bold]source "{fn_path}"[/bold]')
