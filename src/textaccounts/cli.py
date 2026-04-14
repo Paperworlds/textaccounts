@@ -208,6 +208,22 @@ complete -c textaccounts -n "__fish_seen_subcommand_from create" -l from -d "Par
 complete -c textaccounts -n "__fish_seen_subcommand_from install" -l shell -d "Shell type" -a "fish"
 """
 
+_FISH_TA_FUNCTION = """\
+# ta — shorthand for textaccounts (with switch support)
+# Installed by: textaccounts install
+
+function ta --wraps=textaccounts --description 'textaccounts shortcut'
+    textaccounts $argv
+end
+"""
+
+_FISH_TA_COMPLETIONS = """\
+# ta completions — mirrors textaccounts completions
+# Installed by: textaccounts install
+
+complete -c ta --wraps textaccounts
+"""
+
 
 @main.command()
 @click.option("--shell", "shell_name", default=None, help="Shell to install for (default: auto-detect).")
@@ -235,10 +251,15 @@ def install(shell_name: str | None) -> None:
 
     fn_path = fish_fn_dir / "textaccounts.fish"
     comp_path = fish_comp_dir / "textaccounts.fish"
+    ta_fn_path = fish_fn_dir / "ta.fish"
+    ta_comp_path = fish_comp_dir / "ta.fish"
 
     fn_path.write_text(_FISH_FUNCTION)
     comp_path.write_text(_FISH_COMPLETIONS)
+    ta_fn_path.write_text(_FISH_TA_FUNCTION)
+    ta_comp_path.write_text(_FISH_TA_COMPLETIONS)
 
     console.print(f"[green]Installed[/green] fish function → {fn_path}")
     console.print(f"[green]Installed[/green] completions  → {comp_path}")
+    console.print(f"[green]Installed[/green] ta alias     → {ta_fn_path}")
     console.print(f"\nOpen a new shell or run: [bold]source {fn_path}[/bold]")
