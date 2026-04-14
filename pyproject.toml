@@ -17,6 +17,7 @@ dependencies = [
 
 [project.scripts]
 textaccounts = "textaccounts.cli:main"
+ta = "textaccounts.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/textaccounts"]
