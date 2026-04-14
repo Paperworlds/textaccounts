@@ -7,7 +7,7 @@ test:
 
 # Install as editable uv tool (no venv required)
 install:
-    uv tool install -e . --force
+    uv tool install -e . --force --python 3.13
 
 # Build distribution
 build:
@@ -16,12 +16,9 @@ build:
 # Install shell integration (fish) + aliases
 install-shell:
     uv run textaccounts install --shell fish
-    #!/usr/bin/env sh
     mkdir -p "$HOME/.config/fish/functions"
-    for f in completions/functions/*.fish; do
-        cp "$f" "$HOME/.config/fish/functions/$(basename $f)"
-        echo "Installed fish function → $HOME/.config/fish/functions/$(basename $f)"
-    done
+    cp completions/functions/*.fish "$HOME/.config/fish/functions/"
+    @echo "Installed fish alias functions"
 
 # Launch the interactive view
 view:
