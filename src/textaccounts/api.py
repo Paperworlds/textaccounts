@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import click
+
 from textaccounts.config import load_registry
 from textaccounts.core import resolve_profile
 
@@ -42,7 +44,7 @@ def profile_dir(name: str) -> Path | None:
     registry = load_registry()
     try:
         canonical = resolve_profile(name, registry)
-    except Exception:
+    except click.UsageError:
         return None
     return registry.profiles[canonical].path
 
@@ -60,8 +62,8 @@ def env_for_profile(name: str) -> dict[str, str]:
     registry = load_registry()
     try:
         canonical = resolve_profile(name, registry)
-    except Exception:
-        raise ValueError(f"Profile '{name}' not found.")
+    except click.UsageError:
+        raise ValueError(f"Profile '{name}' not found.") from None
 
     profile = registry.profiles[canonical]
     return {"CLAUDE_CONFIG_DIR": str(profile.path)}

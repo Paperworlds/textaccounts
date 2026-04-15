@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -187,14 +188,13 @@ def count_sessions(path: Path) -> int:
 
 def _dir_size_bytes(path: Path) -> int:
     """Return disk usage of path in bytes using du (fast, handles large dirs)."""
-    import subprocess
     try:
         out = subprocess.run(
             ["du", "-sk", str(path)], capture_output=True, text=True, timeout=5
         )
         if out.returncode == 0:
             return int(out.stdout.split()[0]) * 1024
-    except Exception:
+    except (ValueError, subprocess.TimeoutExpired, FileNotFoundError):
         pass
     return 0
 
