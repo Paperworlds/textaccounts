@@ -112,7 +112,7 @@ class AdoptModal(_ModalBase["tuple[str, str] | None"]):
             yield Label("Path:")
             yield Input(placeholder="e.g. ~/.claude-work", value=self._path_hint, id="path-input")
             with Horizontal(id="buttons"):
-                yield Button("Adopt", variant="primary", id="adopt-btn")
+                yield Button("Adopt", variant="primary", id=self._PRIMARY_BTN)
                 yield Button("Cancel", id="cancel-btn")
 
     def on_mount(self) -> None:
@@ -149,7 +149,7 @@ class AliasModal(_ModalBase["str | None"]):
             yield Label("Comma-separated aliases (leave empty to clear):")
             yield Input(value=self._current, id="alias-input")
             with Horizontal(id="buttons"):
-                yield Button("Save", variant="primary", id="save-btn")
+                yield Button("Save", variant="primary", id=self._PRIMARY_BTN)
                 yield Button("Cancel", id="cancel-btn")
 
     def on_mount(self) -> None:
@@ -174,7 +174,7 @@ class RenameModal(_ModalBase["str | None"]):
             yield Label("New name:")
             yield Input(value=self._current_name, id="rename-input")
             with Horizontal(id="buttons"):
-                yield Button("Rename", variant="primary", id="rename-btn")
+                yield Button("Rename", variant="primary", id=self._PRIMARY_BTN)
                 yield Button("Cancel", id="cancel-btn")
 
     def on_mount(self) -> None:
