@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TypeVar
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Static
+
+_T = TypeVar("_T")
 
 from textaccounts import core
 from textaccounts.config import CONFIG_PATH, extract_email, load_registry, save_registry
@@ -74,8 +77,27 @@ def _render_detail(profile: dict | None, suggestion: Path | None) -> str:
     return "\n".join(lines)
 
 
-class AdoptModal(ModalScreen["tuple[str, str] | None"]):
+class _ModalBase(ModalScreen[_T]):
+    """Shared behaviour for single-action modal dialogs."""
+
     BINDINGS = [Binding("escape", "dismiss(None)", "Cancel")]
+    _PRIMARY_BTN: str = ""
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == self._PRIMARY_BTN:
+            self._submit()
+        else:
+            self.dismiss(None)
+
+    def on_input_submitted(self, _: Input.Submitted) -> None:
+        self._submit()
+
+    def _submit(self) -> None:
+        raise NotImplementedError
+
+
+class AdoptModal(_ModalBase["tuple[str, str] | None"]):
+    _PRIMARY_BTN = "adopt-btn"
 
     def __init__(self, name_hint: str = "", path_hint: str = "") -> None:
         super().__init__()
@@ -99,12 +121,6 @@ class AdoptModal(ModalScreen["tuple[str, str] | None"]):
         else:
             self.query_one("#name-input", Input).focus()
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "adopt-btn":
-            self._submit()
-        else:
-            self.dismiss(None)
-
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "name-input":
             self.query_one("#path-input", Input).focus()
@@ -117,9 +133,10 @@ class AdoptModal(ModalScreen["tuple[str, str] | None"]):
         self.dismiss((name, path) if name and path else None)
 
 
-class AliasModal(ModalScreen["str | None"]):
+class AliasModal(_ModalBase["str | None"]):
     """Modal to edit aliases (comma-separated)."""
-    BINDINGS = [Binding("escape", "dismiss(None)", "Cancel")]
+
+    _PRIMARY_BTN = "save-btn"
 
     def __init__(self, profile_name: str, current_aliases: list[str]) -> None:
         super().__init__()
@@ -138,22 +155,14 @@ class AliasModal(ModalScreen["str | None"]):
     def on_mount(self) -> None:
         self.query_one("#alias-input", Input).focus()
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "save-btn":
-            self._submit()
-        else:
-            self.dismiss(None)
-
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        self._submit()
-
     def _submit(self) -> None:
         self.dismiss(self.query_one("#alias-input", Input).value)
 
 
-class RenameModal(ModalScreen["str | None"]):
+class RenameModal(_ModalBase["str | None"]):
     """Modal to rename a profile."""
-    BINDINGS = [Binding("escape", "dismiss(None)", "Cancel")]
+
+    _PRIMARY_BTN = "rename-btn"
 
     def __init__(self, current_name: str) -> None:
         super().__init__()
@@ -170,15 +179,6 @@ class RenameModal(ModalScreen["str | None"]):
 
     def on_mount(self) -> None:
         self.query_one("#rename-input", Input).focus()
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "rename-btn":
-            self._submit()
-        else:
-            self.dismiss(None)
-
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        self._submit()
 
     def _submit(self) -> None:
         value = self.query_one("#rename-input", Input).value.strip()
@@ -197,15 +197,15 @@ class TextAccountsApp(App):
         padding: 1 2;
         border: solid $surface;
     }
-    AdoptModal #dialog, AliasModal #dialog, RenameModal #dialog {
+    _ModalBase #dialog {
         width: 60;
         padding: 1 2;
         background: $surface;
         border: solid $primary;
         margin: 4 8;
     }
-    AdoptModal #title, AliasModal #title, RenameModal #title { margin-bottom: 1; }
-    AdoptModal #buttons, AliasModal #buttons, RenameModal #buttons { margin-top: 1; align-horizontal: right; }
+    _ModalBase #title { margin-bottom: 1; }
+    _ModalBase #buttons { margin-top: 1; align-horizontal: right; }
     """
 
     TITLE = "textaccounts"
