@@ -65,6 +65,22 @@ def test_load_missing_file_returns_empty(tmp_path):
     assert registry.profiles == {}
 
 
+def test_load_registry_raises_on_missing_path_key(tmp_path):
+    config_path = tmp_path / "profiles.yaml"
+    config_path.write_text("profiles:\n  work:\n    email: foo@example.com\n")
+
+    with pytest.raises(ValueError, match="missing required key 'path'"):
+        load_registry(config_path=config_path)
+
+
+def test_load_registry_raises_on_non_dict_entry(tmp_path):
+    config_path = tmp_path / "profiles.yaml"
+    config_path.write_text("profiles:\n  work: not-a-mapping\n")
+
+    with pytest.raises(ValueError, match="must be a mapping"):
+        load_registry(config_path=config_path)
+
+
 def test_extract_email_masks_correctly(tmp_path):
     claude_json = tmp_path / ".claude.json"
     claude_json.write_text(

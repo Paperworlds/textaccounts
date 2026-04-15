@@ -43,6 +43,14 @@ def load_registry(config_path: Path = CONFIG_PATH) -> ProfileRegistry:
 
     profiles: dict[str, Profile] = {}
     for name, entry in (data.get("profiles") or {}).items():
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f"profiles.yaml: profile '{name}' must be a mapping, got {type(entry).__name__}"
+            )
+        if "path" not in entry:
+            raise ValueError(
+                f"profiles.yaml: profile '{name}' is missing required key 'path'"
+            )
         profiles[name] = Profile(
             name=name,
             path=Path(entry["path"]),
