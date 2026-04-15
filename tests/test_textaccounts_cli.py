@@ -1,27 +1,9 @@
-import json
-from pathlib import Path
-
 import pytest
 from click.testing import CliRunner
 
 from textaccounts.cli import main
 from textaccounts.config import Profile, ProfileRegistry
-
-
-# ── helpers ──────────────────────────────────────────────────────────────────
-
-
-def make_claude_json(path: Path, email: str = "test@example.com") -> None:
-    (path / ".claude.json").write_text(
-        json.dumps({"oauthAccount": {"emailAddress": email}})
-    )
-
-
-def make_registry(tmp_path: Path) -> tuple[ProfileRegistry, Path]:
-    config_path = tmp_path / "profiles.yaml"
-    profiles_dir = tmp_path / "profiles"
-    profiles_dir.mkdir()
-    return ProfileRegistry(profiles_dir=profiles_dir), config_path
+from conftest import make_claude_json, make_registry
 
 
 def patch_registry(monkeypatch, registry: ProfileRegistry, config_path: Path) -> None:

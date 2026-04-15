@@ -3,13 +3,13 @@
 The API is the stable contract for consumers like textsessions.
 """
 
-import json
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from textaccounts.config import CONFIG_PATH, ProfileRegistry, Profile, save_registry
+from conftest import make_claude_json
 
 
 def _write_registry(tmp_path: Path, profiles: dict[str, Profile], active: str | None = None) -> Path:
@@ -17,13 +17,6 @@ def _write_registry(tmp_path: Path, profiles: dict[str, Profile], active: str | 
     registry = ProfileRegistry(active=active, profiles=profiles, profiles_dir=tmp_path / "profiles")
     save_registry(registry, config_path)
     return config_path
-
-
-def make_claude_json(path: Path, email: str = "test@example.com") -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    (path / ".claude.json").write_text(
-        json.dumps({"oauthAccount": {"emailAddress": email}})
-    )
 
 
 @pytest.fixture
