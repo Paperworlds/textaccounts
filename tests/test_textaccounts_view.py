@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,18 +10,7 @@ import pytest
 import yaml
 
 from textaccounts.view import TextAccountsApp, _fmt_size, _render_detail, _short_path
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _make_profile_dir(path: Path, email: str = "test@example.com") -> Path:
-    path.mkdir(parents=True, exist_ok=True)
-    (path / ".claude.json").write_text(
-        json.dumps({"oauthAccount": {"emailAddress": email}})
-    )
-    return path
+from conftest import make_claude_json
 
 
 def _write_registry(config_path: Path, active: str | None, profiles: dict) -> None:
@@ -120,8 +108,10 @@ _NO_SUGGESTIONS = patch("textaccounts.core.discover_unregistered", return_value=
 
 
 def test_view_mounts_with_profiles(tmp_path: Path):
-    work = _make_profile_dir(tmp_path / "claude-work", "work@example.com")
-    personal = _make_profile_dir(tmp_path / "claude-personal", "me@example.com")
+    work = tmp_path / "claude-work"
+    make_claude_json(work, "work@example.com")
+    personal = tmp_path / "claude-personal"
+    make_claude_json(personal, "me@example.com")
     config = tmp_path / "profiles.yaml"
     _write_registry(config, "work", {
         "work": {"path": str(work)},
@@ -139,7 +129,8 @@ def test_view_mounts_with_profiles(tmp_path: Path):
 
 
 def test_view_shows_active_marker(tmp_path: Path):
-    work = _make_profile_dir(tmp_path / "claude-work")
+    work = tmp_path / "claude-work"
+    make_claude_json(work)
     config = tmp_path / "profiles.yaml"
     _write_registry(config, "work", {"work": {"path": str(work)}})
 
@@ -155,8 +146,10 @@ def test_view_shows_active_marker(tmp_path: Path):
 
 
 def test_switch_updates_active_marker(tmp_path: Path):
-    work = _make_profile_dir(tmp_path / "claude-work")
-    personal = _make_profile_dir(tmp_path / "claude-personal")
+    work = tmp_path / "claude-work"
+    make_claude_json(work)
+    personal = tmp_path / "claude-personal"
+    make_claude_json(personal)
     config = tmp_path / "profiles.yaml"
     _write_registry(config, "work", {
         "work": {"path": str(work)},
@@ -195,7 +188,8 @@ def test_adopt_modal_opens_on_a(tmp_path: Path):
 
 
 def test_adopt_registers_profile(tmp_path: Path):
-    work = _make_profile_dir(tmp_path / "claude-work")
+    work = tmp_path / "claude-work"
+    make_claude_json(work)
     config = tmp_path / "profiles.yaml"
     _write_registry(config, None, {})
 

@@ -98,6 +98,8 @@ class _ModalBase(ModalScreen[_T]):
 
 class AdoptModal(_ModalBase["tuple[str, str] | None"]):
     _PRIMARY_BTN = "adopt-btn"
+    _NAME_INPUT = "name-input"
+    _PATH_INPUT = "path-input"
 
     def __init__(self, name_hint: str = "", path_hint: str = "") -> None:
         super().__init__()
@@ -108,28 +110,28 @@ class AdoptModal(_ModalBase["tuple[str, str] | None"]):
         with Vertical(id="dialog"):
             yield Label("[bold]Adopt existing Claude config dir[/bold]", id="title")
             yield Label("Profile name:")
-            yield Input(placeholder="e.g. work", value=self._name_hint, id="name-input")
+            yield Input(placeholder="e.g. work", value=self._name_hint, id=self._NAME_INPUT)
             yield Label("Path:")
-            yield Input(placeholder="e.g. ~/.claude-work", value=self._path_hint, id="path-input")
+            yield Input(placeholder="e.g. ~/.claude-work", value=self._path_hint, id=self._PATH_INPUT)
             with Horizontal(id="buttons"):
                 yield Button("Adopt", variant="primary", id=self._PRIMARY_BTN)
                 yield Button("Cancel", id="cancel-btn")
 
     def on_mount(self) -> None:
         if self._name_hint:
-            self.query_one("#path-input", Input).focus()
+            self.query_one(f"#{self._PATH_INPUT}", Input).focus()
         else:
-            self.query_one("#name-input", Input).focus()
+            self.query_one(f"#{self._NAME_INPUT}", Input).focus()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.input.id == "name-input":
-            self.query_one("#path-input", Input).focus()
+        if event.input.id == self._NAME_INPUT:
+            self.query_one(f"#{self._PATH_INPUT}", Input).focus()
         else:
             self._submit()
 
     def _submit(self) -> None:
-        name = self.query_one("#name-input", Input).value.strip()
-        path = self.query_one("#path-input", Input).value.strip()
+        name = self.query_one(f"#{self._NAME_INPUT}", Input).value.strip()
+        path = self.query_one(f"#{self._PATH_INPUT}", Input).value.strip()
         self.dismiss((name, path) if name and path else None)
 
 
@@ -137,6 +139,7 @@ class AliasModal(_ModalBase["str | None"]):
     """Modal to edit aliases (comma-separated)."""
 
     _PRIMARY_BTN = "save-btn"
+    _ALIAS_INPUT = "alias-input"
 
     def __init__(self, profile_name: str, current_aliases: list[str]) -> None:
         super().__init__()
@@ -147,22 +150,23 @@ class AliasModal(_ModalBase["str | None"]):
         with Vertical(id="dialog"):
             yield Label(f"[bold]Aliases for {self._profile_name}[/bold]", id="title")
             yield Label("Comma-separated aliases (leave empty to clear):")
-            yield Input(value=self._current, id="alias-input")
+            yield Input(value=self._current, id=self._ALIAS_INPUT)
             with Horizontal(id="buttons"):
                 yield Button("Save", variant="primary", id=self._PRIMARY_BTN)
                 yield Button("Cancel", id="cancel-btn")
 
     def on_mount(self) -> None:
-        self.query_one("#alias-input", Input).focus()
+        self.query_one(f"#{self._ALIAS_INPUT}", Input).focus()
 
     def _submit(self) -> None:
-        self.dismiss(self.query_one("#alias-input", Input).value)
+        self.dismiss(self.query_one(f"#{self._ALIAS_INPUT}", Input).value)
 
 
 class RenameModal(_ModalBase["str | None"]):
     """Modal to rename a profile."""
 
     _PRIMARY_BTN = "rename-btn"
+    _RENAME_INPUT = "rename-input"
 
     def __init__(self, current_name: str) -> None:
         super().__init__()
@@ -172,16 +176,16 @@ class RenameModal(_ModalBase["str | None"]):
         with Vertical(id="dialog"):
             yield Label(f"[bold]Rename {self._current_name}[/bold]", id="title")
             yield Label("New name:")
-            yield Input(value=self._current_name, id="rename-input")
+            yield Input(value=self._current_name, id=self._RENAME_INPUT)
             with Horizontal(id="buttons"):
                 yield Button("Rename", variant="primary", id=self._PRIMARY_BTN)
                 yield Button("Cancel", id="cancel-btn")
 
     def on_mount(self) -> None:
-        self.query_one("#rename-input", Input).focus()
+        self.query_one(f"#{self._RENAME_INPUT}", Input).focus()
 
     def _submit(self) -> None:
-        value = self.query_one("#rename-input", Input).value.strip()
+        value = self.query_one(f"#{self._RENAME_INPUT}", Input).value.strip()
         self.dismiss(value if value else None)
 
 

@@ -202,8 +202,8 @@ def _dir_size_bytes(path: Path) -> int:
 def list_profiles(registry: ProfileRegistry) -> list[dict]:
     result = []
     for name, profile in registry.profiles.items():
-        size = _dir_size_bytes(profile.path) if profile.path.is_dir() else 0
         exists = profile.path.is_dir()
+        size = _dir_size_bytes(profile.path) if exists else 0
         result.append(
             {
                 "name": name,
