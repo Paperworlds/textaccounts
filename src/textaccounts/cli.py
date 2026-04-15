@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess as _sp
 from pathlib import Path
 
 import click
@@ -12,9 +13,19 @@ from textaccounts import core
 
 console = Console()
 
+try:
+    _git_hash = _sp.check_output(
+        ["git", "rev-parse", "--short", "HEAD"],
+        stderr=_sp.DEVNULL, text=True,
+        cwd=Path(__file__).parent,
+    ).strip()
+    _version_str = f"{__version__} ({_git_hash})"
+except Exception:
+    _version_str = __version__
+
 
 @click.group()
-@click.version_option(__version__, prog_name="textaccounts")
+@click.version_option(_version_str, "--version", "-V", prog_name="textaccounts")
 def main() -> None:
     """Manage Claude config profiles."""
 
