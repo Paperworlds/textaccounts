@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "textaccounts"
 version = "0.4.0"
 description = "Manage multiple Claude Code accounts with full directory isolation"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 license = "MIT"
 dependencies = [
     "click>=8.0",
