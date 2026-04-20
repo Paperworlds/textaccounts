@@ -19,9 +19,9 @@ try:
         stderr=_sp.DEVNULL, text=True,
         cwd=Path(__file__).parent,
     ).strip()
-    _version_str = f"{__version__} ({_git_hash})"
+    _version_str = f"textaccounts, version {__version__} ({_git_hash})"
 except Exception:
-    _version_str = __version__
+    _version_str = f"textaccounts, version {__version__}"
 
 
 @click.group()
@@ -193,9 +193,12 @@ function __textaccounts_profiles
     end
 end
 
-set -l __ta_cmds adopt alias create install list rename show status switch view
+set -l __ta_cmds adopt alias create doctor install list rename repo repos show status switch view
 
 complete -c textaccounts -f -n "not __fish_seen_subcommand_from $__ta_cmds" -a "adopt" -d "Register existing dir as profile"
+complete -c textaccounts -f -n "not __fish_seen_subcommand_from $__ta_cmds" -a "doctor" -d "Check for stale profile paths"
+complete -c textaccounts -f -n "not __fish_seen_subcommand_from $__ta_cmds" -a "repo" -d "Manage profile paths"
+complete -c textaccounts -f -n "not __fish_seen_subcommand_from $__ta_cmds" -a "repos" -d "Print all profiles as REPO lines"
 complete -c textaccounts -f -n "not __fish_seen_subcommand_from $__ta_cmds" -a "alias" -d "Add or remove a profile alias"
 complete -c textaccounts -f -n "not __fish_seen_subcommand_from $__ta_cmds" -a "create" -d "Create a new profile"
 complete -c textaccounts -f -n "not __fish_seen_subcommand_from $__ta_cmds" -a "install" -d "Install shell integration"
@@ -273,7 +276,7 @@ _textaccounts_complete() {
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
-    cmds="adopt alias create install list rename show status switch view"
+    cmds="adopt alias create doctor install list rename repo repos show status switch view"
 
     if [ "$COMP_CWORD" -eq 1 ]; then
         COMPREPLY=( $(compgen -W "$cmds" -- "$cur") )
@@ -319,7 +322,7 @@ _textaccounts_profiles() {
 
 _textaccounts() {
     local -a cmds profiles
-    cmds=(adopt alias create install list rename show status switch view)
+    cmds=(adopt alias create doctor install list rename repo repos show status switch view)
 
     if (( CURRENT == 2 )); then
         _describe 'command' cmds
@@ -332,6 +335,53 @@ _textaccounts() {
 compdef _textaccounts textaccounts
 compdef _textaccounts ta
 """
+
+
+@main.command()
+def doctor() -> None:
+    """Check for stale profile paths. Exits 0 if clean, 1 if any are stale."""
+    registry = load_registry()
+    stale = []
+    for name, profile in registry.profiles.items():
+        if profile.path.is_dir():
+            console.print(f"[green]OK[/green]     {name}  {profile.path}")
+        else:
+            console.print(f"[red]STALE[/red]  {name}  {profile.path}")
+            stale.append(name)
+    if stale:
+        raise SystemExit(1)
+
+
+@main.command("repos")
+def repos_cmd() -> None:
+    """Print all registered profiles as parseable REPO lines."""
+    registry = load_registry()
+    for name, profile in registry.profiles.items():
+        active_flag = "active" if name == registry.active else ""
+        parts = ["REPO", name, str(profile.path)]
+        if active_flag:
+            parts.append(active_flag)
+        click.echo("  ".join(parts))
+
+
+@main.group("repo")
+def repo_group() -> None:
+    """Subcommands for managing profile paths."""
+
+
+@repo_group.command("move")
+@click.argument("name")
+@click.argument("new_path", type=click.Path())
+def repo_move(name: str, new_path: str) -> None:
+    """Update a profile's registered path (does not move files on disk)."""
+    registry = load_registry()
+    canonical = core.resolve_profile(name, registry)
+    dest = Path(new_path).expanduser().resolve()
+    if not dest.is_dir():
+        raise click.UsageError(f"Directory not found: {dest}")
+    registry.profiles[canonical].path = dest
+    save_registry(registry)
+    console.print(f"[green]MOVED[/green]  {canonical}  →  {dest}")
 
 
 @main.command()

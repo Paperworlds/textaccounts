@@ -108,11 +108,11 @@ Claude Code reads `CLAUDE_CONFIG_DIR` natively. No patches, no wrappers around `
 - [ ] Upgrade to Python 3.13
 - [ ] `d` key in view to remove/unregister a profile
 - [ ] Bash/zsh shell integration (currently fish only)
-- [ ] `textaccounts doctor` — check for stale paths, missing `.claude.json`, env sync issues
 
-## Part of Paperworlds
-
-textaccounts is part of [Paperworlds](https://github.com/Paperworlds) — an open org building tools and games around AI agents and text interfaces.
+> [!NOTE]
+> **Part of Paperworlds**
+>
+> textaccounts is part of [Paperworlds](https://github.com/Paperworlds) — an open org building tools and games around AI agents and text interfaces.
 
 ## License
 
