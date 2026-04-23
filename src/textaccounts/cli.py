@@ -161,6 +161,24 @@ def status() -> None:
 
 
 @main.command()
+@click.argument("name")
+@click.argument("text", required=False, default="")
+def describe(name: str, text: str) -> None:
+    """Set (or clear) the description for a profile."""
+    from textaccounts.core import _write_active_description
+    registry = load_registry()
+    canonical = core.resolve_profile(name, registry)
+    registry.profiles[canonical].description = text.strip()
+    save_registry(registry)
+    if registry.active == canonical:
+        _write_active_description(text.strip())
+    if text.strip():
+        console.print(f"[green]Set[/green] description for [bold]{canonical}[/bold]: {text.strip()}")
+    else:
+        console.print(f"[yellow]Cleared[/yellow] description for [bold]{canonical}[/bold]")
+
+
+@main.command()
 def desc() -> None:
     """Print the active profile's description (for statusline integration).
 
