@@ -162,6 +162,32 @@ class AliasModal(_ModalBase["str | None"]):
         self.dismiss(self.query_one(f"#{self._ALIAS_INPUT}", Input).value)
 
 
+class NoteModal(_ModalBase["str | None"]):
+    """Modal to set a short description shown in the bottom bar."""
+
+    _PRIMARY_BTN = "save-btn"
+    _NOTE_INPUT = "note-input"
+
+    def __init__(self, profile_name: str, current_note: str) -> None:
+        super().__init__()
+        self._profile_name = profile_name
+        self._current = current_note
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="dialog"):
+            yield Label(f"[bold]Note for {self._profile_name}[/bold]", id="title")
+            yield Input(value=self._current, placeholder="Short description…", id=self._NOTE_INPUT)
+            with Horizontal(id="buttons"):
+                yield Button("Save", variant="primary", id=self._PRIMARY_BTN)
+                yield Button("Cancel", id="cancel-btn")
+
+    def on_mount(self) -> None:
+        self.query_one(f"#{self._NOTE_INPUT}", Input).focus()
+
+    def _submit(self) -> None:
+        self.dismiss(self.query_one(f"#{self._NOTE_INPUT}", Input).value)
+
+
 class RenameModal(_ModalBase["str | None"]):
     """Modal to rename a profile."""
 
@@ -191,7 +217,8 @@ class RenameModal(_ModalBase["str | None"]):
 
 class TextAccountsApp(App):
     CSS = """
-    Screen { layout: horizontal; }
+    Screen { layout: vertical; }
+    #main { layout: horizontal; height: 1fr; }
     #profiles {
         width: 3fr;
         border: solid $primary;
@@ -200,6 +227,12 @@ class TextAccountsApp(App):
         width: 2fr;
         padding: 1 2;
         border: solid $surface;
+    }
+    #desc-bar {
+        height: 1;
+        padding: 0 1;
+        background: $surface-darken-1;
+        color: $text-muted;
     }
     _ModalBase #dialog {
         width: 60;
@@ -219,6 +252,7 @@ class TextAccountsApp(App):
         Binding("a", "adopt", "Adopt"),
         Binding("l", "edit_aliases", "Aliases"),
         Binding("r", "rename_profile", "Rename"),
+        Binding("n", "edit_note", "Note"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -230,9 +264,10 @@ class TextAccountsApp(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with Horizontal():
+        with Horizontal(id="main"):
             yield DataTable(id="profiles", cursor_type="row")
             yield Static(id="detail")
+        yield Static("", id="desc-bar")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -297,6 +332,8 @@ class TextAccountsApp(App):
         profile = self._selected_profile()
         suggestion = self._selected_suggestion() if profile is None else None
         self.query_one("#detail", Static).update(_render_detail(profile, suggestion))
+        desc = profile.get("description", "") if profile else ""
+        self.query_one("#desc-bar", Static).update(f"[dim]{desc}[/dim]" if desc else "")
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         self._update_detail()
@@ -384,3 +421,23 @@ class TextAccountsApp(App):
                 self.notify(str(e), severity="error")
 
         self.push_screen(RenameModal(profile["name"]), handle)
+
+    def action_edit_note(self) -> None:
+        profile = self._selected_profile()
+        if profile is None:
+            return
+
+        def handle(result: str | None) -> None:
+            if result is None:
+                return
+            try:
+                registry = load_registry(self._config_path)
+                p = registry.profiles.get(profile["name"])
+                if p:
+                    p.description = result.strip()
+                    save_registry(registry, self._config_path)
+                    self._refresh()
+            except Exception as e:
+                self.notify(str(e), severity="error")
+
+        self.push_screen(NoteModal(profile["name"], profile.get("description", "")), handle)

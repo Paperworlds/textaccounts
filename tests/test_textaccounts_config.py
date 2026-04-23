@@ -25,6 +25,7 @@ def test_registry_round_trip(tmp_path):
                 email="pau***@example.com",
                 adopted="2026-04-12T10:00:00Z",
                 worker=False,
+                description="Main work account",
             ),
             "work-worker": Profile(
                 name="work-worker",
@@ -49,10 +50,12 @@ def test_registry_round_trip(tmp_path):
     assert work.adopted == "2026-04-12T10:00:00Z"
     assert work.worker is False
     assert work.parent is None
+    assert work.description == "Main work account"
 
     worker = loaded.profiles["work-worker"]
     assert worker.worker is True
     assert worker.parent == "work"
+    assert worker.description == ""
 
     assert loaded.profiles_dir == profiles_dir
 

@@ -111,6 +111,8 @@ def rename(old_name: str, new_name: str, registry: ProfileRegistry) -> Profile:
         adopted=profile.adopted,
         worker=profile.worker,
         parent=profile.parent,
+        aliases=profile.aliases,
+        description=profile.description,
     )
     registry.profiles[new_name] = profile
     if registry.active == old_name:
@@ -215,6 +217,7 @@ def list_profiles(registry: ProfileRegistry) -> list[dict]:
                 "active": name == registry.active,
                 "exists": exists,
                 "aliases": profile.aliases,
+                "description": profile.description,
             }
         )
     return result

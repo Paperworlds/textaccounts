@@ -6,6 +6,7 @@ from textaccounts.core import (
     adopt,
     create_from_current,
     create_worker,
+    rename,
     show,
     list_profiles,
 )
@@ -131,6 +132,27 @@ def test_show_updates_active_in_registry(tmp_path):
 
     show("work", registry)
     assert registry.active == "work"
+
+
+# --- rename ---
+
+def test_rename_preserves_aliases_and_description(tmp_path):
+    registry, _ = make_registry(tmp_path)
+
+    d = tmp_path / "claude-work"
+    d.mkdir()
+    make_claude_json(d)
+    registry.profiles["work"] = Profile(
+        name="work", path=d, email="", aliases=["w"], description="day job"
+    )
+
+    renamed = rename("work", "job", registry)
+
+    assert renamed.name == "job"
+    assert renamed.aliases == ["w"]
+    assert renamed.description == "day job"
+    assert "job" in registry.profiles
+    assert "work" not in registry.profiles
 
 
 # --- list_profiles ---
