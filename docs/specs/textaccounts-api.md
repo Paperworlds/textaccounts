@@ -1,10 +1,12 @@
 ---
 slug: textaccounts-api
 owner: textaccounts
-status: draft
+status: adopted
 version: 0.1.0
 consumers:
 - textsessions
+- textworkspace
+adopted_at: '2026-04-24'
 ---
 # textaccounts public Python API
 
