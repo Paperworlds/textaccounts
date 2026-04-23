@@ -162,8 +162,41 @@ def status() -> None:
 
 @main.command()
 def desc() -> None:
-    """Print the active profile's description (for statusline integration)."""
+    """Print the active profile's description (for statusline integration).
+
+    Resolves the profile in this order:
+      1. $CLAUDE_CONFIG_DIR matches a registered profile (works for subprocesses
+         launched by textsessions, where the env var is set directly).
+      2. The registry's `active` field.
+      3. Cache file written by `textaccounts switch`.
+    """
+    import os
+    from pathlib import Path as _Path
     from textaccounts.core import _ACTIVE_DESC_FILE
+
+    env_dir = os.environ.get("CLAUDE_CONFIG_DIR")
+    if env_dir:
+        try:
+            registry = load_registry()
+            target = _Path(env_dir).resolve()
+            for profile in registry.profiles.values():
+                if profile.path.resolve() == target:
+                    if profile.description:
+                        click.echo(profile.description)
+                    return
+        except Exception:
+            pass
+
+    try:
+        registry = load_registry()
+        if registry.active:
+            profile = registry.profiles.get(registry.active)
+            if profile and profile.description:
+                click.echo(profile.description)
+                return
+    except Exception:
+        pass
+
     if _ACTIVE_DESC_FILE.exists():
         text = _ACTIVE_DESC_FILE.read_text().strip()
         if text:
