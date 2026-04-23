@@ -49,6 +49,18 @@ def profile_dir(name: str) -> Path | None:
     return registry.profiles[canonical].path
 
 
+def profile_description(name: str) -> str:
+    """Return the description for a profile, or empty string if not found."""
+    if name == "default":
+        return ""
+    registry = load_registry()
+    try:
+        canonical = resolve_profile(name, registry)
+    except click.UsageError:
+        return ""
+    return registry.profiles[canonical].description
+
+
 def env_for_profile(name: str) -> dict[str, str]:
     """Return env vars that should be set to activate a profile.
 
