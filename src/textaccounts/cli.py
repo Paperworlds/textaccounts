@@ -161,6 +161,16 @@ def status() -> None:
 
 
 @main.command()
+def desc() -> None:
+    """Print the active profile's description (for statusline integration)."""
+    from textaccounts.core import _ACTIVE_DESC_FILE
+    if _ACTIVE_DESC_FILE.exists():
+        text = _ACTIVE_DESC_FILE.read_text().strip()
+        if text:
+            click.echo(text)
+
+
+@main.command()
 def view() -> None:
     """Launch the interactive profile view."""
     from textaccounts.view import TextAccountsApp
@@ -432,6 +442,12 @@ def _install_fish() -> None:
     console.print(f"[green]Installed[/green] completions  → {comp_path}")
     console.print(f"[green]Installed[/green] ta alias     → {ta_fn_path}")
     console.print(f"\nOpen a new shell or run: [bold]source {fn_path}[/bold]")
+    console.print(
+        "\n[dim]Claude Code statusline:[/dim] add [bold]$(textaccounts desc 2>/dev/null)[/bold] "
+        "to your statusline script, or set:\n"
+        '  [bold]"statusLine": {"type": "command", "command": "textaccounts desc"}[/bold]\n'
+        "in [bold]~/.claude/settings.json[/bold]"
+    )
 
 
 def _install_posix(shell_name: str) -> None:
