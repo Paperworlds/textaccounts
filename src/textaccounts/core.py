@@ -144,8 +144,20 @@ def remove_alias(profile_name: str, alias: str, registry: ProfileRegistry) -> Pr
     return profile
 
 
+_ACTIVE_DESC_FILE = Path.home() / ".textaccounts" / "active-description"
+
+
+def _write_active_description(description: str) -> None:
+    try:
+        _ACTIVE_DESC_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _ACTIVE_DESC_FILE.write_text(description)
+    except OSError:
+        pass
+
+
 def show(name: str, registry: ProfileRegistry, shell: str = "fish") -> str:
     if name == "default":
+        _write_active_description("")
         if shell == "fish":
             return "set -e CLAUDE_CONFIG_DIR"
         return "unset CLAUDE_CONFIG_DIR"
@@ -153,6 +165,7 @@ def show(name: str, registry: ProfileRegistry, shell: str = "fish") -> str:
     canonical = resolve_profile(name, registry)
     registry.active = canonical
     profile = registry.profiles[canonical]
+    _write_active_description(profile.description)
     if shell == "fish":
         return f"set -gx CLAUDE_CONFIG_DIR {profile.path}"
     return f"export CLAUDE_CONFIG_DIR={profile.path}"

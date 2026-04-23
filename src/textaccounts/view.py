@@ -15,6 +15,7 @@ _T = TypeVar("_T")
 
 from textaccounts import core
 from textaccounts.config import CONFIG_PATH, extract_email, load_registry, save_registry
+from textaccounts.core import _write_active_description
 
 _HOME = Path.home()
 
@@ -436,6 +437,8 @@ class TextAccountsApp(App):
                 if p:
                     p.description = result.strip()
                     save_registry(registry, self._config_path)
+                    if registry.active == profile["name"]:
+                        _write_active_description(p.description)
                     self._refresh()
             except Exception as e:
                 self.notify(str(e), severity="error")
