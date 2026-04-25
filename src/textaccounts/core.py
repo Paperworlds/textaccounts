@@ -63,6 +63,81 @@ def create_from_current(name: str, registry: ProfileRegistry) -> Profile:
     return adopt(name, dest, registry)
 
 
+# Fields to preserve from .claude.json when cloning. Everything else
+# (projects, mcpServers, UI counters, caches) is stripped to leave a clean slate.
+_CLONE_KEEP_CLAUDE_JSON: frozenset[str] = frozenset({
+    "oauthAccount",
+    "userID",
+    "anonymousId",
+    "migrationVersion",
+    "theme",
+})
+
+# Top-level entries to copy from a source profile dir during clone (if present).
+# Symlinks are preserved as symlinks; directories are deep-copied.
+_CLONE_COPY_ENTRIES: tuple[str, ...] = (
+    "settings.json",
+    "agents",
+    "hooks",
+    "plugins",
+    "commands",
+    "memory",
+    "agent-memory",
+)
+
+
+def clone_profile(name: str, source_name: str, registry: ProfileRegistry) -> Profile:
+    """Clone a profile's setup (auth + settings + agents/hooks/plugins + symlinks),
+    stripping all state (sessions, projects, history, caches).
+    """
+    import json
+
+    if name in registry.profiles:
+        raise click.UsageError(f"Profile '{name}' already exists.")
+    if source_name not in registry.profiles:
+        raise click.UsageError(f"Source profile '{source_name}' not found.")
+
+    source = registry.profiles[source_name].path
+    if not validate_config_dir(source):
+        raise click.UsageError(f"Source profile is missing .claude.json: {source}")
+
+    dest = registry.profiles_dir / name
+    if dest.exists():
+        raise click.UsageError(f"Destination already exists: {dest}")
+
+    dest.mkdir(parents=True)
+
+    with (source / ".claude.json").open() as f:
+        src_data = json.load(f)
+    cleaned = {k: v for k, v in src_data.items() if k in _CLONE_KEEP_CLAUDE_JSON}
+    with (dest / ".claude.json").open("w") as f:
+        json.dump(cleaned, f, indent=2)
+
+    for entry in _CLONE_COPY_ENTRIES:
+        src_entry = source / entry
+        if not src_entry.exists() and not src_entry.is_symlink():
+            continue
+        dst_entry = dest / entry
+        if src_entry.is_symlink():
+            dst_entry.symlink_to(os.readlink(src_entry))
+        elif src_entry.is_dir():
+            shutil.copytree(src_entry, dst_entry, symlinks=True)
+        else:
+            shutil.copy2(src_entry, dst_entry)
+
+    email = extract_email(dest)
+    profile = Profile(
+        name=name,
+        path=dest,
+        email=email,
+        adopted=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        worker=False,
+        parent=source_name,
+    )
+    registry.profiles[name] = profile
+    return profile
+
+
 def create_worker(name: str, parent_name: str, registry: ProfileRegistry) -> Profile:
     if name in registry.profiles:
         raise click.UsageError(f"Profile '{name}' already exists.")

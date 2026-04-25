@@ -46,12 +46,34 @@ textaccounts adopt <name> <path>         # register an existing dir
 textaccounts create <name>               # snapshot current config dir
 textaccounts create <name> --worker \
   --from <parent>                        # auth-only copy for parallel work
+textaccounts create <name> \
+  --clone-from <src>                     # clone setup (auth+settings+agents+hooks+plugins),
+                                         # strip state (sessions/projects/history/caches)
 textaccounts switch <name>               # switch profile (sets CLAUDE_CONFIG_DIR)
 textaccounts show <name>                 # print shell command without executing
 textaccounts rename <old> <new>          # rename a profile
 textaccounts alias <profile> <alias>     # add a shorthand alias
+textaccounts describe <name> [text]      # set/clear a per-profile description (omit text to clear)
+textaccounts desc                        # print current profile's description (for statuslines)
 textaccounts view                        # interactive profile view
 textaccounts install [--shell fish]      # install shell integration
+```
+
+## Per-profile descriptions
+
+Each profile can carry a free-text description (a one-liner like `"day job"` or
+`"hobby + paperworlds"`). It shows up:
+
+- In the interactive view bottom bar when a profile is highlighted (`n` to edit)
+- In your Claude Code statusline via `textaccounts desc`, which resolves the
+  description for the *current* `CLAUDE_CONFIG_DIR` — so subprocesses launched
+  by tools like `textsessions` show the right description automatically
+
+Wire it into your statusline script:
+
+```bash
+ta_desc=$(textaccounts desc 2>/dev/null)
+[ -n "$ta_desc" ] && parts+=("$ta_desc")
 ```
 
 ## Interactive view
@@ -64,6 +86,7 @@ textaccounts install [--shell fish]      # install shell integration
 | `a` | Adopt a new directory |
 | `r` | Rename selected profile |
 | `l` | Edit aliases |
+| `n` | Edit description (shown in bottom bar) |
 | `q` | Quit |
 
 Auto-discovers unregistered `~/.claude*/` directories and shows them as adoption suggestions.
@@ -82,11 +105,13 @@ profiles:
     email: yo***@company.com
     adopted: 2026-04-12T10:00:00Z
     worker: false
+    description: day job
   personal:
     path: /Users/you/.claude-personal
     email: y***@gmail.com
     adopted: 2026-04-12T10:00:00Z
     worker: false
+    description: hobby projects
     aliases:
       - p
 
@@ -101,6 +126,13 @@ New profiles created with `textaccounts create` go into `~/.textaccounts/profile
 `textaccounts switch` sets `CLAUDE_CONFIG_DIR` in your shell via a fish function that evals the output of `textaccounts show`. A Python subprocess can't modify the parent shell's environment directly — the fish function bridges that gap.
 
 Claude Code reads `CLAUDE_CONFIG_DIR` natively. No patches, no wrappers around `claude` itself.
+
+## Public API
+
+`textaccounts.api` is the stable import surface for tools that integrate with
+textaccounts (see `textsessions` for an example consumer). Functions:
+`available`, `list_profiles`, `active_profile`, `profile_dir`, `env_for_profile`,
+`profile_description`. Full contract: [docs/specs/textaccounts-api.md](docs/specs/textaccounts-api.md).
 
 ## Roadmap
 

@@ -47,9 +47,13 @@ def adopt(name: str, path: str) -> None:
 @click.argument("name")
 @click.option("--worker", is_flag=True, help="Create a minimal worker profile.")
 @click.option("--from", "parent", default=None, help="Parent profile name (required with --worker).")
-def create(name: str, worker: bool, parent: str | None) -> None:
-    """Create a new profile from the current config or as a worker."""
+@click.option("--clone-from", "clone_from", default=None,
+              help="Clone setup from another profile (auth + settings + agents/hooks/plugins, stripped of state).")
+def create(name: str, worker: bool, parent: str | None, clone_from: str | None) -> None:
+    """Create a new profile from the current config, as a worker, or by cloning another profile."""
     registry = load_registry()
+    if worker and clone_from:
+        raise click.UsageError("--worker and --clone-from are mutually exclusive")
     if worker:
         if not parent:
             raise click.UsageError("--from <parent> is required with --worker")
@@ -58,6 +62,13 @@ def create(name: str, worker: bool, parent: str | None) -> None:
         console.print(
             f"[green]Created[/green] worker profile [bold]{profile.name}[/bold]"
             f" (parent: {profile.parent})"
+        )
+    elif clone_from:
+        profile = core.clone_profile(name, clone_from, registry)
+        save_registry(registry)
+        console.print(
+            f"[green]Cloned[/green] [bold]{clone_from}[/bold] → [bold]{profile.name}[/bold]"
+            f" at {profile.path} [dim](stripped of sessions/history/caches)[/dim]"
         )
     else:
         profile = core.create_from_current(name, registry)
