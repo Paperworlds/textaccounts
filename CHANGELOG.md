@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.4.1
+
+- feat: `textaccounts create --clone-from <src>` for clean profile clones
+- feat: `textaccounts describe` command (and `desc` short form for statusline integration)
+- feat: expose `profile_description` in public API
+- feat: write active profile description to cache file for statusline consumers
+- feat: per-profile description shown in bottom bar of the interactive view
+- fix: `textaccounts desc` resolves profile via `CLAUDE_CONFIG_DIR`
+- spec: add textaccounts-api spec (draft v0.1.0); textworkspace listed as a consumer
+- chore: full PyPI metadata in `pyproject.toml` (authors, urls, classifiers, keywords)
+- chore: lower `requires-python` to `>=3.13`
+- ci: pin CI Python to 3.14 to match local dev environment
+- fix: add missing `Path` import in `test_textaccounts_cli.py` (CI failure)
+
 ## v0.4.0
 
 - Add `textaccounts doctor` — checks all registered profile paths; exits 1 if any are stale
