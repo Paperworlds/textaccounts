@@ -40,7 +40,7 @@ def adopt(name: str, path: Path, registry: ProfileRegistry) -> Profile:
         path=path,
         email=email,
         adopted=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        worker=False,
+        shallow=False,
         parent=None,
     )
     registry.profiles[name] = profile
@@ -131,14 +131,25 @@ def clone_profile(name: str, source_name: str, registry: ProfileRegistry) -> Pro
         path=dest,
         email=email,
         adopted=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        worker=False,
+        shallow=False,
         parent=source_name,
     )
     registry.profiles[name] = profile
     return profile
 
 
-def create_worker(name: str, parent_name: str, registry: ProfileRegistry) -> Profile:
+# SPEC: shallow-clone
+def create_shallow(
+    name: str,
+    parent_name: str,
+    registry: ProfileRegistry,
+    ephemeral: bool = False,
+    owner: str = "",
+) -> Profile:
+    """Create a shallow clone — copies only .claude.json + settings.json from
+    the parent. No agents/, hooks/, plugins/, sessions/, etc. Optionally flagged
+    `ephemeral` so `textaccounts gc` and `destroy` can sweep it later.
+    """
     if name in registry.profiles:
         raise click.UsageError(f"Profile '{name}' already exists.")
     if parent_name not in registry.profiles:
@@ -165,11 +176,18 @@ def create_worker(name: str, parent_name: str, registry: ProfileRegistry) -> Pro
         path=dest,
         email=email,
         adopted=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        worker=True,
+        shallow=True,
         parent=parent_name,
+        ephemeral=ephemeral,
+        owner=owner,
     )
     registry.profiles[name] = profile
     return profile
+
+
+# Deprecated alias — kept for backward compat. New code should use create_shallow.
+def create_worker(name: str, parent_name: str, registry: ProfileRegistry) -> Profile:
+    return create_shallow(name, parent_name, registry)
 
 
 def rename(old_name: str, new_name: str, registry: ProfileRegistry) -> Profile:
@@ -184,10 +202,12 @@ def rename(old_name: str, new_name: str, registry: ProfileRegistry) -> Profile:
         path=profile.path,
         email=profile.email,
         adopted=profile.adopted,
-        worker=profile.worker,
+        shallow=profile.shallow,
         parent=profile.parent,
         aliases=profile.aliases,
         description=profile.description,
+        ephemeral=profile.ephemeral,
+        owner=profile.owner,
     )
     registry.profiles[new_name] = profile
     if registry.active == old_name:
@@ -299,16 +319,122 @@ def list_profiles(registry: ProfileRegistry) -> list[dict]:
                 "name": name,
                 "path": profile.path,
                 "email": profile.email,
-                "worker": profile.worker,
+                "shallow": profile.shallow,
+                # Backward-compat key for older view/CLI code that still reads "worker".
+                "worker": profile.shallow,
                 "dir_size": size,
                 "sessions": count_sessions(profile.path),
                 "active": name == registry.active,
                 "exists": exists,
                 "aliases": profile.aliases,
                 "description": profile.description,
+                "ephemeral": profile.ephemeral,
+                "owner": profile.owner,
+                "adopted": profile.adopted,
             }
         )
     return result
+
+
+# ---------------------------------------------------------------------------
+# Ephemeral lifecycle: gc + destroy
+# ---------------------------------------------------------------------------
+
+GC_LOG_PATH = Path.home() / ".local" / "state" / "textaccounts" / "gc.log"
+DEFAULT_GC_MAX_AGE_DAYS = 7
+
+
+def _parse_adopted(adopted: str) -> datetime | None:
+    if not adopted:
+        return None
+    try:
+        return datetime.strptime(adopted, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _audit_log(action: str, profile: Profile, reason: str) -> None:
+    """Append one line to the gc audit log. Best-effort: never raises."""
+    try:
+        GC_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        line = (
+            f"{ts}\t{action}\t{profile.name}\t"
+            f"owner={profile.owner or '-'}\t"
+            f"adopted={profile.adopted or '-'}\t"
+            f"reason={reason}\n"
+        )
+        with GC_LOG_PATH.open("a") as f:
+            f.write(line)
+    except OSError:
+        pass
+
+
+def _remove_profile(profile: Profile, registry: ProfileRegistry) -> None:
+    """Remove a profile dir + registry entry. Caller is responsible for safety
+    checks (ephemeral flag, etc.) and audit logging."""
+    if profile.path.is_dir():
+        shutil.rmtree(profile.path)
+    registry.profiles.pop(profile.name, None)
+
+
+def destroy(name: str, registry: ProfileRegistry) -> Profile:
+    """Remove a single ephemeral profile. Refuses non-ephemeral profiles."""
+    canonical = resolve_profile(name, registry)
+    profile = registry.profiles[canonical]
+    if not profile.ephemeral:
+        raise click.UsageError(
+            f"Profile '{canonical}' is not ephemeral. "
+            f"`destroy` only removes profiles marked `ephemeral: true`. "
+            f"Use the registry edit path for permanent profiles."
+        )
+    _audit_log("destroy", profile, "explicit")
+    _remove_profile(profile, registry)
+    if registry.active == canonical:
+        registry.active = None
+    return profile
+
+
+def gc(
+    registry: ProfileRegistry,
+    max_age_days: int = DEFAULT_GC_MAX_AGE_DAYS,
+    owner: str | None = None,
+    dry_run: bool = False,
+) -> list[Profile]:
+    """Sweep ephemeral profiles older than max_age_days (and matching owner if given).
+
+    Returns the list of profiles that were (or would be, if dry_run) removed.
+    Refuses to touch non-ephemeral profiles regardless of age.
+    """
+    now = datetime.now(timezone.utc)
+    cutoff_seconds = max_age_days * 86400
+    to_remove: list[Profile] = []
+
+    for profile in list(registry.profiles.values()):
+        if not profile.ephemeral:
+            continue
+        if owner is not None and profile.owner != owner:
+            continue
+        adopted_dt = _parse_adopted(profile.adopted)
+        if adopted_dt is None:
+            # No adopted timestamp — treat as old enough to sweep.
+            age_seconds = cutoff_seconds + 1
+        else:
+            age_seconds = (now - adopted_dt).total_seconds()
+        if age_seconds < cutoff_seconds:
+            continue
+        to_remove.append(profile)
+
+    for profile in to_remove:
+        if dry_run:
+            _audit_log("gc-dry-run", profile, f"max_age={max_age_days}d")
+        else:
+            _audit_log("gc", profile, f"max_age={max_age_days}d")
+            _remove_profile(profile, registry)
+            if registry.active == profile.name:
+                registry.active = None
+
+    return to_remove
 
 
 def discover_unregistered(registry: ProfileRegistry) -> list[Path]:

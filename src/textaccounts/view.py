@@ -73,8 +73,11 @@ def _render_detail(profile: dict | None, suggestion: Path | None) -> str:
         lines.append(f"Size:     {_fmt_size(profile['dir_size'])}")
     if profile.get("aliases"):
         lines.append(f"Aliases:  {', '.join(profile['aliases'])}")
-    if profile["worker"]:
-        lines.append("[dim]worker (auth-only copy)[/dim]")
+    if profile.get("shallow"):
+        suffix = " · ephemeral" if profile.get("ephemeral") else ""
+        lines.append(f"[dim]shallow clone (auth-only copy){suffix}[/dim]")
+        if profile.get("owner"):
+            lines.append(f"[dim]owner: {profile['owner']}[/dim]")
     return "\n".join(lines)
 
 
@@ -289,10 +292,16 @@ class TextAccountsApp(App):
                 name_col = f"[red]{p['name']}[/red]"
             elif p["active"]:
                 marker = "[green]*[/green]"
-                name_col = f"[bold]{p['name']}[/bold]" + (" [worker]" if p["worker"] else "")
+                tag = " [shallow]" if p.get("shallow") else ""
+                if p.get("ephemeral"):
+                    tag += " [ephemeral]"
+                name_col = f"[bold]{p['name']}[/bold]" + tag
             else:
                 marker = ""
-                name_col = p["name"] + (" [worker]" if p["worker"] else "")
+                tag = " [shallow]" if p.get("shallow") else ""
+                if p.get("ephemeral"):
+                    tag += " [ephemeral]"
+                name_col = p["name"] + tag
             table.add_row(
                 marker,
                 name_col,

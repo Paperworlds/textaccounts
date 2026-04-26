@@ -47,7 +47,7 @@ def test_render_detail_active_profile():
         "email": "pao***@example.com",
         "sessions": 12,
         "dir_size": 1024 * 512,
-        "worker": False,
+        "shallow": False,
     }
     text = _render_detail(p, None)
     assert "work" in text
@@ -65,7 +65,7 @@ def test_render_detail_broken_path():
         "email": "",
         "sessions": 0,
         "dir_size": 0,
-        "worker": False,
+        "shallow": False,
     }
     assert "not found" in _render_detail(p, None)
 
@@ -76,7 +76,7 @@ def test_render_detail_suggestion(tmp_path: Path):
     assert "adopt" in text.lower()
 
 
-def test_render_detail_worker_flag():
+def test_render_detail_shallow_flag():
     p = {
         "name": "work-bot",
         "active": False,
@@ -85,9 +85,27 @@ def test_render_detail_worker_flag():
         "email": "",
         "sessions": 0,
         "dir_size": 0,
-        "worker": True,
+        "shallow": True,
     }
-    assert "worker" in _render_detail(p, None)
+    assert "shallow" in _render_detail(p, None)
+
+
+def test_render_detail_ephemeral_with_owner():
+    p = {
+        "name": "ephemeral-bot",
+        "active": False,
+        "exists": True,
+        "path": Path("/tmp/eph"),
+        "email": "",
+        "sessions": 0,
+        "dir_size": 0,
+        "shallow": True,
+        "ephemeral": True,
+        "owner": "run-7",
+    }
+    text = _render_detail(p, None)
+    assert "ephemeral" in text
+    assert "run-7" in text
 
 
 def test_short_path_home_relative(tmp_path: Path):

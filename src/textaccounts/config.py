@@ -17,10 +17,12 @@ class Profile:
     path: Path
     email: str = ""
     adopted: str = ""
-    worker: bool = False
+    shallow: bool = False
     parent: Optional[str] = None
     aliases: list[str] = field(default_factory=list)
     description: str = ""
+    ephemeral: bool = False
+    owner: str = ""
 
 
 @dataclass
@@ -52,15 +54,19 @@ def load_registry(config_path: Path = CONFIG_PATH) -> ProfileRegistry:
             raise ValueError(
                 f"profiles.yaml: profile '{name}' is missing required key 'path'"
             )
+        # Backward compat: accept both `shallow:` (canonical) and `worker:` (legacy).
+        shallow = entry.get("shallow", entry.get("worker", False))
         profiles[name] = Profile(
             name=name,
             path=Path(entry["path"]),
             email=entry.get("email", ""),
             adopted=entry.get("adopted", ""),
-            worker=entry.get("worker", False),
+            shallow=shallow,
             parent=entry.get("parent"),
             aliases=entry.get("aliases", []),
             description=entry.get("description", ""),
+            ephemeral=entry.get("ephemeral", False),
+            owner=entry.get("owner", ""),
         )
 
     return ProfileRegistry(
@@ -80,13 +86,17 @@ def save_registry(registry: ProfileRegistry, config_path: Path = CONFIG_PATH) ->
             entry["email"] = profile.email
         if profile.adopted:
             entry["adopted"] = profile.adopted
-        entry["worker"] = profile.worker
+        entry["shallow"] = profile.shallow
         if profile.parent is not None:
             entry["parent"] = profile.parent
         if profile.aliases:
             entry["aliases"] = profile.aliases
         if profile.description:
             entry["description"] = profile.description
+        if profile.ephemeral:
+            entry["ephemeral"] = True
+        if profile.owner:
+            entry["owner"] = profile.owner
         profiles_data[name] = entry
 
     data: dict = {"version": "1.0"}

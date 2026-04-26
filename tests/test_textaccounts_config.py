@@ -24,15 +24,17 @@ def test_registry_round_trip(tmp_path):
                 path=tmp_path / "claude-work",
                 email="pau***@example.com",
                 adopted="2026-04-12T10:00:00Z",
-                worker=False,
+                shallow=False,
                 description="Main work account",
             ),
             "work-worker": Profile(
                 name="work-worker",
                 path=tmp_path / "claude-profiles" / "work-worker",
                 email="pau***@example.com",
-                worker=True,
+                shallow=True,
                 parent="work",
+                ephemeral=True,
+                owner="run-42",
             ),
         },
         profiles_dir=profiles_dir,
@@ -48,16 +50,34 @@ def test_registry_round_trip(tmp_path):
     assert work.path == tmp_path / "claude-work"
     assert work.email == "pau***@example.com"
     assert work.adopted == "2026-04-12T10:00:00Z"
-    assert work.worker is False
+    assert work.shallow is False
     assert work.parent is None
     assert work.description == "Main work account"
+    assert work.ephemeral is False
+    assert work.owner == ""
 
     worker = loaded.profiles["work-worker"]
-    assert worker.worker is True
+    assert worker.shallow is True
     assert worker.parent == "work"
     assert worker.description == ""
+    assert worker.ephemeral is True
+    assert worker.owner == "run-42"
 
     assert loaded.profiles_dir == profiles_dir
+
+
+def test_load_registry_accepts_legacy_worker_key(tmp_path):
+    """Older profiles.yaml files used `worker:` instead of `shallow:`."""
+    config_path = tmp_path / "profiles.yaml"
+    config_path.write_text(
+        "profiles:\n"
+        "  bot:\n"
+        "    path: /tmp/bot\n"
+        "    worker: true\n"
+        "    parent: main\n"
+    )
+    loaded = load_registry(config_path=config_path)
+    assert loaded.profiles["bot"].shallow is True
 
 
 def test_load_missing_file_returns_empty(tmp_path):

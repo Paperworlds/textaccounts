@@ -64,20 +64,25 @@ def test_list_shows_table(tmp_path, monkeypatch):
     assert "*" in result.output  # active marker
 
 
-def test_list_shows_worker_tag(tmp_path, monkeypatch):
+def test_list_shows_shallow_tag(tmp_path, monkeypatch):
     registry, config_path = make_registry(tmp_path)
 
     d = tmp_path / "claude-bot"
     d.mkdir()
     make_claude_json(d)
-    registry.profiles["bot"] = Profile(name="bot", path=d, email="", worker=True)
+    registry.profiles["bot"] = Profile(
+        name="bot", path=d, email="",
+        shallow=True, ephemeral=True, owner="run-1",
+    )
     patch_registry(monkeypatch, registry, config_path)
 
     runner = CliRunner()
     result = runner.invoke(main, ["list"])
 
     assert result.exit_code == 0
-    assert "[worker]" in result.output
+    assert "[shallow]" in result.output
+    assert "[ephemeral]" in result.output
+    assert "[owner=run-1]" in result.output
 
 
 # ── show ──────────────────────────────────────────────────────────────────────
@@ -166,7 +171,7 @@ def test_status_no_active_profile(tmp_path, monkeypatch):
 # ── create ────────────────────────────────────────────────────────────────────
 
 
-def test_create_worker_from_parent(tmp_path, monkeypatch):
+def test_create_shallow_from_parent(tmp_path, monkeypatch):
     registry, config_path = make_registry(tmp_path)
 
     parent_dir = tmp_path / "claude-main"
@@ -177,14 +182,110 @@ def test_create_worker_from_parent(tmp_path, monkeypatch):
     patch_registry(monkeypatch, registry, config_path)
 
     runner = CliRunner()
+    result = runner.invoke(main, ["create", "bot", "--shallow", "--from", "main"])
+
+    assert result.exit_code == 0, result.output
+    assert "shallow clone" in result.output
+    assert "bot" in registry.profiles
+    assert registry.profiles["bot"].shallow is True
+    assert registry.profiles["bot"].ephemeral is False
+    assert registry.profiles["bot"].parent == "main"
+
+
+def test_create_worker_alias_emits_deprecation(tmp_path, monkeypatch):
+    registry, config_path = make_registry(tmp_path)
+    parent_dir = tmp_path / "claude-main"
+    parent_dir.mkdir()
+    make_claude_json(parent_dir)
+    registry.profiles["main"] = Profile(name="main", path=parent_dir, email="")
+    patch_registry(monkeypatch, registry, config_path)
+
+    runner = CliRunner()
     result = runner.invoke(main, ["create", "bot", "--worker", "--from", "main"])
 
     assert result.exit_code == 0, result.output
-    assert "Created" in result.output
-    assert "bot" in result.output
-    assert "bot" in registry.profiles
-    assert registry.profiles["bot"].worker is True
-    assert registry.profiles["bot"].parent == "main"
+    # Click 8 combines stderr into output by default.
+    assert "deprecated" in result.output
+    assert registry.profiles["bot"].shallow is True
+
+
+def test_create_shallow_with_owner_implies_ephemeral(tmp_path, monkeypatch):
+    registry, config_path = make_registry(tmp_path)
+    parent_dir = tmp_path / "claude-main"
+    parent_dir.mkdir()
+    make_claude_json(parent_dir)
+    registry.profiles["main"] = Profile(name="main", path=parent_dir, email="")
+    patch_registry(monkeypatch, registry, config_path)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        ["create", "bot", "--shallow", "--from", "main", "--owner", "run-7"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert registry.profiles["bot"].ephemeral is True
+    assert registry.profiles["bot"].owner == "run-7"
+
+
+def test_destroy_removes_ephemeral(tmp_path, monkeypatch):
+    registry, config_path = make_registry(tmp_path)
+    p = tmp_path / "claude-bot"
+    p.mkdir()
+    make_claude_json(p)
+    registry.profiles["bot"] = Profile(
+        name="bot", path=p, email="",
+        shallow=True, ephemeral=True, owner="run-1",
+    )
+    patch_registry(monkeypatch, registry, config_path)
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["destroy", "bot"])
+
+    assert result.exit_code == 0, result.output
+    assert "Destroyed" in result.output
+    assert "bot" not in registry.profiles
+    assert not p.exists()
+
+
+def test_destroy_refuses_non_ephemeral(tmp_path, monkeypatch):
+    registry, config_path = make_registry(tmp_path)
+    p = tmp_path / "claude-permanent"
+    p.mkdir()
+    make_claude_json(p)
+    registry.profiles["permanent"] = Profile(name="permanent", path=p, email="")
+    patch_registry(monkeypatch, registry, config_path)
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["destroy", "permanent"])
+
+    assert result.exit_code != 0
+    assert "not ephemeral" in result.output
+    assert "permanent" in registry.profiles
+    assert p.exists()
+
+
+def test_gc_dry_run_lists_without_removing(tmp_path, monkeypatch):
+    from datetime import datetime, timezone, timedelta
+
+    registry, config_path = make_registry(tmp_path)
+    p = registry.profiles_dir / "old-bot"
+    p.mkdir(parents=True)
+    make_claude_json(p)
+    old = (datetime.now(timezone.utc) - timedelta(days=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    registry.profiles["old-bot"] = Profile(
+        name="old-bot", path=p, email="",
+        shallow=True, ephemeral=True, adopted=old,
+    )
+    patch_registry(monkeypatch, registry, config_path)
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["gc", "--max-age", "7d", "--dry-run"])
+
+    assert result.exit_code == 0, result.output
+    assert "Would remove" in result.output
+    assert "old-bot" in registry.profiles
+    assert p.exists()
 
 
 # ── install ──────────────────────────────────────────────────────────────────

@@ -53,11 +53,17 @@ textaccounts list                        # show all profiles
 textaccounts status                      # active profile + sync state
 textaccounts adopt <name> <path>         # register an existing dir
 textaccounts create <name>               # snapshot current config dir
-textaccounts create <name> --worker \
-  --from <parent>                        # auth-only copy for parallel work
+textaccounts create <name> --shallow \
+  --from <parent>                        # shallow clone — copy only .claude.json + settings.json
 textaccounts create <name> \
-  --clone-from <src>                     # clone setup (auth+settings+agents+hooks+plugins),
+  --clone-from <src>                     # deep clone — auth + settings + agents/hooks/plugins,
                                          # strip state (sessions/projects/history/caches)
+textaccounts create <name> --shallow \
+  --from <parent> --ephemeral \
+  [--owner <run-id>]                     # mark for sweep by `gc` / `destroy`
+textaccounts gc [--max-age 7d] \
+  [--owner <run-id>] [--dry-run]         # sweep ephemeral profiles older than max-age
+textaccounts destroy <name>              # remove a single ephemeral profile
 textaccounts switch <name>               # switch profile (sets CLAUDE_CONFIG_DIR)
 textaccounts show <name>                 # print shell command without executing
 textaccounts rename <old> <new>          # rename a profile
@@ -65,8 +71,47 @@ textaccounts alias <profile> <alias>     # add a shorthand alias
 textaccounts describe <name> [text]      # set/clear a per-profile description (omit text to clear)
 textaccounts desc                        # print current profile's description (for statuslines)
 textaccounts view                        # interactive profile view
+textaccounts doctor                      # check stale paths + Claude Code version
 textaccounts install [--shell fish]      # install shell integration
 ```
+
+## Shallow clones and ephemeral lifecycle
+
+`--shallow --from <parent>` creates a minimal copy: just `.claude.json` and
+`settings.json`, no `agents/`, `hooks/`, `plugins/`, `sessions/`, etc. Useful
+when an orchestrator (e.g. a parallel-agents batch leader) needs many isolated
+worker profiles cheaply. `--clone-from <src>` is the deeper variant that also
+copies `agents/`, `hooks/`, `plugins/`, and symlinks.
+
+**Disposable runs.** Add `--ephemeral` (or `--owner <run-id>`, which implies
+ephemeral) to flag the profile for cleanup:
+
+```sh
+# Orchestrator: spawn a worker for a specific run-id
+textaccounts create bot-1 --shallow --from work --owner run-42
+
+# When the run is done, sweep everything it created
+textaccounts gc --owner run-42
+
+# Or destroy a single one immediately
+textaccounts destroy bot-1
+```
+
+`gc` defaults to `--max-age 7d` and ignores anything not flagged
+`ephemeral: true` — so it can't accidentally remove your real profiles. Every
+removal is appended to `~/.local/state/textaccounts/gc.log` for auditing.
+
+> [!NOTE]
+> **Auth share is partial.** Claude Code v2.1.56+ keys keychain entries by
+> `sha256(CLAUDE_CONFIG_DIR)[:8]`, so a shallow clone gets a *new* keychain
+> entry. The clone inherits whatever OAuth tokens are embedded in the copied
+> `.claude.json` and works until the next refresh, after which it diverges
+> from the parent. For long-running clones, expect a separate `/login`.
+
+> [!NOTE]
+> `--worker` is a deprecated alias for `--shallow`. It still works but emits
+> a one-line warning. The on-disk YAML key was renamed `worker` → `shallow`
+> with read-time backward compat.
 
 ## Per-profile descriptions
 

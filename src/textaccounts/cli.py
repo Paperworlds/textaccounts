@@ -45,30 +45,70 @@ def adopt(name: str, path: str) -> None:
 
 @main.command("create")
 @click.argument("name")
-@click.option("--worker", is_flag=True, help="Create a minimal worker profile.")
-@click.option("--from", "parent", default=None, help="Parent profile name (required with --worker).")
+@click.option("--shallow", "shallow", is_flag=True,
+              help="Shallow clone: copy only .claude.json + settings.json from --from parent.")
+@click.option("--worker", "worker", is_flag=True, hidden=True,
+              help="Deprecated alias for --shallow.")
+@click.option("--from", "parent", default=None,
+              help="Parent profile name (required with --shallow).")
 @click.option("--clone-from", "clone_from", default=None,
-              help="Clone setup from another profile (auth + settings + agents/hooks/plugins, stripped of state).")
-def create(name: str, worker: bool, parent: str | None, clone_from: str | None) -> None:
-    """Create a new profile from the current config, as a worker, or by cloning another profile."""
+              help="Deep clone: copy auth + settings + agents/hooks/plugins, stripped of state.")
+@click.option("--ephemeral", "ephemeral", is_flag=True,
+              help="Mark the new profile ephemeral so `textaccounts gc/destroy` can sweep it.")
+@click.option("--owner", "owner", default="",
+              help="Owner ID (e.g. orchestrator run-id) for `gc --owner` filtering. Implies --ephemeral.")
+def create(
+    name: str,
+    shallow: bool,
+    worker: bool,
+    parent: str | None,
+    clone_from: str | None,
+    ephemeral: bool,
+    owner: str,
+) -> None:
+    """Create a new profile from the current config, as a shallow clone, or as a deep clone."""
     registry = load_registry()
-    if worker and clone_from:
-        raise click.UsageError("--worker and --clone-from are mutually exclusive")
+
+    # --owner implies --ephemeral
+    if owner:
+        ephemeral = True
+
+    # Backward compat: --worker is now --shallow.
     if worker:
+        if shallow:
+            raise click.UsageError("--worker is a deprecated alias for --shallow; pass only one")
+        click.echo("warning: --worker is deprecated, use --shallow instead", err=True)
+        shallow = True
+
+    if shallow and clone_from:
+        raise click.UsageError("--shallow and --clone-from are mutually exclusive")
+    if ephemeral and not (shallow or clone_from):
+        raise click.UsageError("--ephemeral / --owner require --shallow or --clone-from")
+
+    if shallow:
         if not parent:
-            raise click.UsageError("--from <parent> is required with --worker")
-        profile = core.create_worker(name, parent, registry)
+            raise click.UsageError("--from <parent> is required with --shallow")
+        profile = core.create_shallow(name, parent, registry, ephemeral=ephemeral, owner=owner)
         save_registry(registry)
+        tag = " [dim]ephemeral[/dim]" if ephemeral else ""
+        owner_tag = f" [dim]owner={owner}[/dim]" if owner else ""
         console.print(
-            f"[green]Created[/green] worker profile [bold]{profile.name}[/bold]"
-            f" (parent: {profile.parent})"
+            f"[green]Created[/green] shallow clone [bold]{profile.name}[/bold]"
+            f" (parent: {profile.parent}){tag}{owner_tag}"
         )
     elif clone_from:
         profile = core.clone_profile(name, clone_from, registry)
-        save_registry(registry)
+        if ephemeral:
+            profile.ephemeral = True
+            profile.owner = owner
+            save_registry(registry)
+        else:
+            save_registry(registry)
+        tag = " [dim]ephemeral[/dim]" if ephemeral else ""
+        owner_tag = f" [dim]owner={owner}[/dim]" if owner else ""
         console.print(
             f"[green]Cloned[/green] [bold]{clone_from}[/bold] → [bold]{profile.name}[/bold]"
-            f" at {profile.path} [dim](stripped of sessions/history/caches)[/dim]"
+            f" at {profile.path} [dim](stripped of sessions/history/caches)[/dim]{tag}{owner_tag}"
         )
     else:
         profile = core.create_from_current(name, registry)
@@ -95,14 +135,20 @@ def list_cmd() -> None:
     for p in profiles:
         active_marker = "*" if p["active"] else ""
         size_kb = p["dir_size"] // 1024
-        tags = "\\[worker]" if p["worker"] else ""
+        tag_parts: list[str] = []
+        if p["shallow"]:
+            tag_parts.append("\\[shallow]")
+        if p.get("ephemeral"):
+            tag_parts.append("\\[ephemeral]")
+        if p.get("owner"):
+            tag_parts.append(f"\\[owner={p['owner']}]")
         table.add_row(
             active_marker,
             p["name"],
             str(p["path"]),
             p["email"] or "",
             f"{size_kb}K",
-            tags,
+            " ".join(tag_parts),
         )
 
     console.print(table)
@@ -465,6 +511,57 @@ def doctor() -> None:
 
     if stale:
         raise SystemExit(1)
+
+
+@main.command()
+@click.option("--max-age", "max_age", default=f"{core.DEFAULT_GC_MAX_AGE_DAYS}d",
+              show_default=True,
+              help="Sweep ephemeral profiles older than this. Format: <N>d for days, e.g. 7d.")
+@click.option("--owner", "owner", default=None,
+              help="Restrict sweep to profiles with this owner ID.")
+@click.option("--dry-run", "dry_run", is_flag=True,
+              help="List what would be removed without removing anything.")
+def gc(max_age: str, owner: str | None, dry_run: bool) -> None:
+    """Sweep ephemeral profiles. Refuses to touch anything not flagged ephemeral."""
+    if not max_age.endswith("d") or not max_age[:-1].isdigit():
+        raise click.UsageError(f"--max-age must be of the form <N>d (got: {max_age})")
+    max_age_days = int(max_age[:-1])
+
+    registry = load_registry()
+    removed = core.gc(registry, max_age_days=max_age_days, owner=owner, dry_run=dry_run)
+
+    if not removed:
+        scope = f" (owner={owner})" if owner else ""
+        console.print(f"[dim]No ephemeral profiles older than {max_age_days}d{scope}.[/dim]")
+        return
+
+    verb = "Would remove" if dry_run else "Removed"
+    color = "yellow" if dry_run else "red"
+    for profile in removed:
+        owner_tag = f" owner={profile.owner}" if profile.owner else ""
+        console.print(
+            f"[{color}]{verb}[/{color}]  [bold]{profile.name}[/bold]  "
+            f"[dim]{profile.path}{owner_tag}  adopted={profile.adopted or '?'}[/dim]"
+        )
+
+    if not dry_run:
+        save_registry(registry)
+    console.print(
+        f"\n[dim]Audit log: {core.GC_LOG_PATH}[/dim]"
+    )
+
+
+@main.command()
+@click.argument("name")
+def destroy(name: str) -> None:
+    """Remove a single ephemeral profile (refuses non-ephemeral)."""
+    registry = load_registry()
+    profile = core.destroy(name, registry)
+    save_registry(registry)
+    console.print(
+        f"[red]Destroyed[/red] [bold]{profile.name}[/bold]  [dim]{profile.path}[/dim]"
+    )
+    console.print(f"[dim]Audit log: {core.GC_LOG_PATH}[/dim]")
 
 
 @main.command("repos")

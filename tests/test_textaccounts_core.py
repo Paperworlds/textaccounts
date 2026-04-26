@@ -6,7 +6,10 @@ from textaccounts.core import (
     adopt,
     clone_profile,
     create_from_current,
+    create_shallow,
     create_worker,
+    destroy,
+    gc,
     rename,
     show,
     list_profiles,
@@ -77,9 +80,9 @@ def test_create_from_current_copies_full_directory(tmp_path, monkeypatch):
     assert profile.name == "snap"
 
 
-# --- create_worker ---
+# --- create_shallow / create_worker (deprecated alias) ---
 
-def test_create_worker_copies_only_claude_json_and_settings(tmp_path):
+def test_create_shallow_copies_only_claude_json_and_settings(tmp_path):
     registry, _ = make_registry(tmp_path)
 
     parent_dir = tmp_path / "claude-work"
@@ -92,14 +95,43 @@ def test_create_worker_copies_only_claude_json_and_settings(tmp_path):
         name="work", path=parent_dir, email="pao***@example.com"
     )
 
-    profile = create_worker("work-bot", "work", registry)
+    profile = create_shallow("work-bot", "work", registry)
 
     dest = registry.profiles_dir / "work-bot"
     assert (dest / ".claude.json").exists()
     assert (dest / "settings.json").exists()
     assert not (dest / "extra.txt").exists()
-    assert profile.worker is True
+    assert profile.shallow is True
+    assert profile.ephemeral is False
+    assert profile.owner == ""
     assert profile.parent == "work"
+
+
+def test_create_worker_alias_still_works(tmp_path):
+    """create_worker() is the deprecated alias for create_shallow()."""
+    registry, _ = make_registry(tmp_path)
+    src = tmp_path / "claude-work"
+    src.mkdir()
+    make_claude_json(src)
+    registry.profiles["work"] = Profile(name="work", path=src, email="")
+
+    profile = create_worker("work-bot", "work", registry)
+    assert profile.shallow is True
+
+
+def test_create_shallow_with_ephemeral_and_owner(tmp_path):
+    registry, _ = make_registry(tmp_path)
+    src = tmp_path / "claude-work"
+    src.mkdir()
+    make_claude_json(src)
+    registry.profiles["work"] = Profile(name="work", path=src, email="")
+
+    profile = create_shallow(
+        "ephemeral-bot", "work", registry, ephemeral=True, owner="run-42"
+    )
+    assert profile.shallow is True
+    assert profile.ephemeral is True
+    assert profile.owner == "run-42"
 
 
 # --- show ---
@@ -199,7 +231,7 @@ def test_clone_strips_state_keeps_auth_and_setup(tmp_path):
     assert not (dest / "cache").exists()
 
     assert profile.parent == "work"
-    assert profile.worker is False
+    assert profile.shallow is False
 
 
 def test_clone_rejects_duplicate_name(tmp_path):
@@ -220,6 +252,95 @@ def test_clone_rejects_unknown_source(tmp_path):
     registry, _ = make_registry(tmp_path)
     with pytest.raises(click.UsageError, match="not found"):
         clone_profile("new", "missing", registry)
+
+
+# --- gc / destroy ---
+
+def _mk_ephemeral(registry, name, *, owner="", days_old=0):
+    """Build a real ephemeral profile dir + register it with `adopted` shifted into the past."""
+    from datetime import datetime, timezone, timedelta
+    p = registry.profiles_dir / name
+    p.mkdir(parents=True)
+    make_claude_json(p)
+    adopted_dt = datetime.now(timezone.utc) - timedelta(days=days_old)
+    adopted = adopted_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    registry.profiles[name] = Profile(
+        name=name, path=p, email="", adopted=adopted,
+        shallow=True, ephemeral=True, owner=owner,
+    )
+    return registry.profiles[name]
+
+
+def test_gc_sweeps_old_ephemerals_only(tmp_path):
+    registry, _ = make_registry(tmp_path)
+
+    fresh = _mk_ephemeral(registry, "fresh", days_old=1)
+    old = _mk_ephemeral(registry, "old", days_old=10)
+    permanent = registry.profiles_dir / "permanent"
+    permanent.mkdir()
+    make_claude_json(permanent)
+    registry.profiles["permanent"] = Profile(
+        name="permanent", path=permanent, email="",
+        shallow=False, ephemeral=False,
+    )
+
+    removed = gc(registry, max_age_days=7)
+
+    removed_names = {p.name for p in removed}
+    assert removed_names == {"old"}
+    assert "old" not in registry.profiles
+    assert "fresh" in registry.profiles
+    assert "permanent" in registry.profiles
+    assert not old.path.exists()
+    assert fresh.path.exists()
+    assert permanent.exists()
+
+
+def test_gc_owner_filter(tmp_path):
+    registry, _ = make_registry(tmp_path)
+    _mk_ephemeral(registry, "alpha", owner="run-1", days_old=10)
+    _mk_ephemeral(registry, "beta", owner="run-2", days_old=10)
+
+    removed = gc(registry, max_age_days=7, owner="run-1")
+    removed_names = {p.name for p in removed}
+    assert removed_names == {"alpha"}
+    assert "beta" in registry.profiles
+
+
+def test_gc_dry_run_does_not_remove(tmp_path):
+    registry, _ = make_registry(tmp_path)
+    p = _mk_ephemeral(registry, "old", days_old=10)
+
+    removed = gc(registry, max_age_days=7, dry_run=True)
+
+    assert {x.name for x in removed} == {"old"}
+    assert "old" in registry.profiles
+    assert p.path.exists()
+
+
+def test_destroy_removes_ephemeral(tmp_path):
+    registry, _ = make_registry(tmp_path)
+    p = _mk_ephemeral(registry, "bot", owner="run-1")
+
+    destroy("bot", registry)
+    assert "bot" not in registry.profiles
+    assert not p.path.exists()
+
+
+def test_destroy_refuses_non_ephemeral(tmp_path):
+    registry, _ = make_registry(tmp_path)
+    src = tmp_path / "claude-work"
+    src.mkdir()
+    make_claude_json(src)
+    registry.profiles["work"] = Profile(
+        name="work", path=src, email="", shallow=False, ephemeral=False,
+    )
+
+    with pytest.raises(click.UsageError, match="not ephemeral"):
+        destroy("work", registry)
+    # Untouched
+    assert "work" in registry.profiles
+    assert src.exists()
 
 
 # --- rename ---
