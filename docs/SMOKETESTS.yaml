@@ -1,0 +1,164 @@
+# Manual smoke-test runbook for textaccounts.
+#
+# Tier 1 + Tier 3 are also automated in scripts/manual-smoke.sh; run before
+# every release. Tier 2 must be done by hand — it requires a real `claude`
+# binary, working OAuth, and is the only way to prove the cloned profile's
+# auth actually functions.
+#
+# Tiers escalate in coverage and risk:
+#   1 — Pure registry/manifest/audit verification, no claude invocation.
+#   2 — Runs claude inside a clone to prove auth + state isolation.
+#   3 — Orchestrator simulation: many profiles, owner-scoped gc.
+#   bonus — Backward-compat read of legacy `worker:` YAML key.
+
+tiers:
+
+  - id: tier-1
+    name: Smoke
+    duration: ~2 min
+    risk: safe (only mutates ephemeral profiles we created)
+    automated_in: scripts/manual-smoke.sh
+    description: |
+      End-to-end create / list / dry-run / destroy / audit verification on a
+      single shallow clone. Catches regressions in flag parsing, manifest
+      writes, the dry-run path, and the destroy safety check.
+    prereqs:
+      - parent profile registered (default: `personal`)
+    steps:
+      - run: textaccounts create test-bot --shallow --from personal --owner test-run
+        verify: |
+          grep -A6 "test-bot:" ~/.textaccounts/profiles.yaml
+          # Expect: shallow: true, ephemeral: true, owner: test-run
+      - run: ls -la ~/.textaccounts/profiles/test-bot/
+        verify: only .claude.json and settings.json present
+      - run: textaccounts list
+        verify: row tagged "[shallow] [ephemeral] [owner=test-run]"
+      - run: textaccounts gc --max-age 0d --owner test-run --dry-run
+        verify: prints "Would remove test-bot ..." but profile still exists
+      - run: textaccounts destroy test-bot
+        verify: |
+          textaccounts list | grep test-bot   # nothing
+          ls ~/.textaccounts/profiles/test-bot # No such file
+      - run: cat ~/.local/state/textaccounts/gc.log
+        verify: lines for gc-dry-run + destroy actions
+
+  - id: tier-2
+    name: Live claude in a clone
+    duration: ~5 min
+    risk: medium (creates a new keychain entry; logs in via OAuth)
+    automated_in: null
+    description: |
+      The unit suite cannot prove that a cloned profile has working auth. This
+      tier runs an actual `claude` invocation inside the clone's
+      CLAUDE_CONFIG_DIR. Validates: (a) embedded OAuth tokens in the copied
+      .claude.json work for at least one request; (b) Claude Code creates a
+      new keychain entry keyed by sha256(clone-path)[:8] (per Claude Code
+      v2.1.56 namespacing); (c) deep clones strip non-auth fields from
+      .claude.json while shallow clones don't.
+    prereqs:
+      - claude binary on PATH, version >= 2.1.56
+      - active OAuth session in the parent profile
+    steps:
+      - run: textaccounts create probe --shallow --from work --owner probe-run
+        verify: profile created
+      - run: |
+          CLAUDE_CONFIG_DIR=~/.textaccounts/profiles/probe \
+            claude -p "echo hello" --output-format text
+        verify: response without /login prompt
+      - run: |
+          h=$(python3 -c "import hashlib; print(hashlib.sha256('$HOME/.textaccounts/profiles/probe'.encode()).hexdigest()[:8])")
+          security find-generic-password -s "Claude Code-credentials-$h" 2>&1 | grep svce
+        verify: a per-clone keychain entry exists (not just the parent's)
+      - run: |
+          python3 -c "import json; d=json.load(open('$HOME/.textaccounts/profiles/probe/.claude.json')); print(sorted(d.keys()))"
+        verify: shallow keeps everything in .claude.json (auth-only copy ≠ deep)
+      - run: textaccounts create probe-deep --clone-from work --owner probe-run
+        verify: deep clone created
+      - run: |
+          python3 -c "import json; d=json.load(open('$HOME/.textaccounts/profiles/probe-deep/.claude.json')); print(sorted(d.keys()))"
+        verify: only oauthAccount, userID, anonymousId, migrationVersion, theme
+      - run: textaccounts gc --max-age 0d --owner probe-run
+        verify: both probes removed; cleanup complete
+
+  - id: tier-3
+    name: Orchestrator simulation
+    duration: ~5 min
+    risk: safe (mutates only profiles we created with this run-id)
+    automated_in: scripts/manual-smoke.sh
+    description: |
+      Mimics what a parallel-agents batch leader does: spawn N ephemeral
+      workers under one run-id, run, sweep by owner. Also checks that
+      profiles owned by other runs (orphans) and permanent profiles survive
+      a scoped gc.
+    prereqs:
+      - parent profile registered (default: `personal`)
+    steps:
+      - run: |
+          for i in 1 2 3 4 5; do
+            textaccounts create batch-bot-$i --shallow --from personal --owner sim-run-99
+          done
+        verify: 5 ephemerals registered with owner sim-run-99
+      - run: textaccounts create orphan-bot --shallow --from personal --owner other-run
+        verify: 1 ephemeral under different owner
+      - run: textaccounts create permanent-test --shallow --from personal
+        verify: 1 permanent (no --ephemeral, no --owner)
+      - run: textaccounts gc --max-age 0d --owner sim-run-99
+        verify: removes only the 5 batch-bots; orphan + permanent untouched
+      - run: textaccounts destroy permanent-test
+        verify: refuses with "not ephemeral" error
+      - run: textaccounts gc --max-age 0d
+        verify: sweeps the remaining orphan; permanent still untouched
+      - run: tail -20 ~/.local/state/textaccounts/gc.log
+        verify: ~7 audit lines from this exercise (5 batch gc + 1 orphan gc + 1 destroy refusal — last one is NOT logged because it errored before _audit_log)
+
+  - id: bonus-legacy-yaml
+    name: Backward-compat read of legacy worker key
+    duration: 30s
+    risk: safe (sandbox tmp dir)
+    automated_in: tests/test_textaccounts_config.py::test_load_registry_accepts_legacy_worker_key
+    description: |
+      Old profiles.yaml files used `worker: true` instead of `shallow: true`.
+      The loader must accept both, mapping legacy `worker:` onto the new
+      `shallow:` field. New writes always use `shallow:`.
+    steps:
+      - run: |
+          mkdir -p /tmp/ta-compat && cd /tmp/ta-compat
+          cat > profiles.yaml <<'YAML'
+          profiles:
+            legacy-bot:
+              path: /tmp/ta-compat/legacy
+              worker: true
+              parent: main
+          YAML
+          mkdir -p legacy && echo '{}' > legacy/.claude.json
+        verify: tmp registry written
+      - run: |
+          python3 -c "
+          from pathlib import Path
+          from textaccounts.config import load_registry
+          r = load_registry(Path('/tmp/ta-compat/profiles.yaml'))
+          print('shallow:', r.profiles['legacy-bot'].shallow)
+          "
+        verify: prints "shallow: True"
+
+# ---------------------------------------------------------------------------
+# Conventions
+# ---------------------------------------------------------------------------
+
+conventions:
+  run_id: |
+    Use a timestamp-prefixed run-id for any profile created during a smoke
+    test (`smoke-$(date +%s)`). Prevents collisions on rerun and makes the
+    `--owner` filter trivial to scope.
+
+  cleanup: |
+    Always end with `textaccounts gc --max-age 0d --owner <run-id>`. The
+    automated script does this in a trap so partial failures still clean up.
+    Permanent test profiles must be removed manually (delete dir + edit
+    profiles.yaml) since `destroy` refuses non-ephemerals by design.
+
+  audit_log: |
+    `~/.local/state/textaccounts/gc.log` is append-only. After a smoke run
+    you should see one line per profile removed (action: gc, gc-dry-run,
+    or destroy). The `destroy refuses non-ephemeral` case does NOT write
+    a log line because the safety check fires before `_audit_log`.
