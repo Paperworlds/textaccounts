@@ -409,9 +409,33 @@ compdef _textaccounts ta
 """
 
 
+_MIN_CLAUDE_VERSION = (2, 1, 56)
+
+
+def _claude_version() -> tuple[int, int, int] | None:
+    """Return the running claude binary's (major, minor, patch), or None."""
+    import shutil
+    if not shutil.which("claude"):
+        return None
+    try:
+        out = _sp.check_output(
+            ["claude", "--version"], stderr=_sp.DEVNULL, text=True, timeout=5
+        ).strip()
+    except (_sp.SubprocessError, OSError):
+        return None
+    import re
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", out)
+    if not m:
+        return None
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+
+
 @main.command()
 def doctor() -> None:
-    """Check for stale profile paths. Exits 0 if clean, 1 if any are stale."""
+    """Check for stale profile paths and verify Claude Code version supports per-profile keychain isolation.
+
+    Exits 0 if clean, 1 if any profile path is stale.
+    """
     registry = load_registry()
     stale = []
     for name, profile in registry.profiles.items():
@@ -420,6 +444,25 @@ def doctor() -> None:
         else:
             console.print(f"[red]STALE[/red]  {name}  {profile.path}")
             stale.append(name)
+
+    version = _claude_version()
+    min_str = ".".join(str(n) for n in _MIN_CLAUDE_VERSION)
+    if version is None:
+        console.print(
+            f"[yellow]WARN[/yellow]   claude binary not found on PATH — cannot verify keychain isolation support (need ≥ v{min_str})"
+        )
+    elif version < _MIN_CLAUDE_VERSION:
+        v_str = ".".join(str(n) for n in version)
+        console.print(
+            f"[red]WARN[/red]   claude v{v_str} < v{min_str} — OAuth tokens are SHARED across profiles (issue #20553). "
+            f"Upgrade Claude Code to get per-CLAUDE_CONFIG_DIR keychain isolation."
+        )
+    else:
+        v_str = ".".join(str(n) for n in version)
+        console.print(
+            f"[green]OK[/green]     claude v{v_str} ≥ v{min_str} — per-profile keychain isolation supported"
+        )
+
     if stale:
         raise SystemExit(1)
 

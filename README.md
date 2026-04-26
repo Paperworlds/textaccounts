@@ -6,6 +6,15 @@ Manage multiple Claude Code accounts with full directory isolation. Each profile
 
 Claude Code stores everything in a single directory tree (`~/.claude/`). If you use multiple accounts (work + personal), you need separate directories. `textaccounts` registers and switches between them by setting `CLAUDE_CONFIG_DIR`.
 
+> [!IMPORTANT]
+> **Requires Claude Code ≥ v2.1.56** for full OAuth isolation. Earlier
+> versions stored every profile's tokens under the same macOS keychain entry
+> (`Claude Code-credentials`), causing them to overwrite each other (see
+> [issue #20553](https://github.com/anthropics/claude-code/issues/20553)).
+> v2.1.56+ namespaces credentials per-profile using
+> `Claude Code-credentials-<sha256(CLAUDE_CONFIG_DIR)[:8]>`. Run
+> `textaccounts doctor` to verify your local version.
+
 ## Install
 
 ```sh
