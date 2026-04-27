@@ -61,6 +61,31 @@ def profile_description(name: str) -> str:
     return registry.profiles[canonical].description
 
 
+def get_profile_lineage(name: str) -> dict | None:
+    """Return lineage metadata for a profile, or None if the name is unknown.
+
+    Keys: shallow (bool), parent (str | None), ephemeral (bool), owner (str).
+    Read-only; consumers can use this to surface lineage in UIs without
+    importing from ``textaccounts.core`` or ``textaccounts.config``.
+
+    Added in textaccounts-api v0.2.0.
+    """
+    if name == "default":
+        return None
+    registry = load_registry()
+    try:
+        canonical = resolve_profile(name, registry)
+    except click.UsageError:
+        return None
+    p = registry.profiles[canonical]
+    return {
+        "shallow": p.shallow,
+        "parent": p.parent,
+        "ephemeral": p.ephemeral,
+        "owner": p.owner,
+    }
+
+
 def env_for_profile(name: str) -> dict[str, str]:
     """Return env vars that should be set to activate a profile.
 

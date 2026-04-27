@@ -130,3 +130,57 @@ class TestEnvForProfile:
             from textaccounts.api import env_for_profile
             with pytest.raises(ValueError, match="not found"):
                 env_for_profile("nope")
+
+
+class TestGetProfileLineage:
+    def test_returns_full_lineage_for_shallow_ephemeral(self):
+        profiles = {
+            "bot": Profile(
+                name="bot", path=Path("/tmp/bot"), email="",
+                shallow=True, parent="work",
+                ephemeral=True, owner="textprompts:run-42",
+            ),
+        }
+        with patch("textaccounts.api.load_registry") as mock:
+            mock.return_value = ProfileRegistry(profiles=profiles)
+            from textaccounts.api import get_profile_lineage
+            assert get_profile_lineage("bot") == {
+                "shallow": True,
+                "parent": "work",
+                "ephemeral": True,
+                "owner": "textprompts:run-42",
+            }
+
+    def test_returns_defaults_for_plain_profile(self):
+        profiles = {"work": Profile(name="work", path=Path("/tmp/w"), email="")}
+        with patch("textaccounts.api.load_registry") as mock:
+            mock.return_value = ProfileRegistry(profiles=profiles)
+            from textaccounts.api import get_profile_lineage
+            assert get_profile_lineage("work") == {
+                "shallow": False,
+                "parent": None,
+                "ephemeral": False,
+                "owner": "",
+            }
+
+    def test_resolves_alias(self):
+        profiles = {
+            "personal": Profile(
+                name="personal", path=Path("/tmp/p"), email="",
+                aliases=["p"],
+            ),
+        }
+        with patch("textaccounts.api.load_registry") as mock:
+            mock.return_value = ProfileRegistry(profiles=profiles)
+            from textaccounts.api import get_profile_lineage
+            assert get_profile_lineage("p") is not None
+
+    def test_none_for_unknown(self):
+        with patch("textaccounts.api.load_registry") as mock:
+            mock.return_value = ProfileRegistry()
+            from textaccounts.api import get_profile_lineage
+            assert get_profile_lineage("nope") is None
+
+    def test_none_for_default(self):
+        from textaccounts.api import get_profile_lineage
+        assert get_profile_lineage("default") is None

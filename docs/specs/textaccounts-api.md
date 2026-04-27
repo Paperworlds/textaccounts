@@ -1,7 +1,7 @@
 ---
 slug: textaccounts-api
 owner: textaccounts
-status: adopted
+status: superseded
 version: 0.1.0
 consumers:
 - textsessions
