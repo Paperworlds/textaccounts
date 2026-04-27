@@ -3,6 +3,9 @@ slug: shallow-clone
 owner: textaccounts
 status: draft
 version: 0.1.0
+consumers:
+- textprompts
+- textworkspace
 ---
 # Shallow-clone profiles + ephemeral lifecycle (gc/destroy)
 
