@@ -1,0 +1,126 @@
+version: 1
+description: |
+  Investigation notes for bugs, wrong assumptions, and failure post-mortems
+  in textaccounts. Each entry should be specific enough that a future session
+  can pick up the thread cold and know exactly what to look at.
+
+investigations:
+  - id: shallow-clone-auth-never-works
+    title: Shallow clone auth assumption was wrong — tokens never in .claude.json on current Claude Code
+    status: open
+    priority: high
+    forum_threads:
+      - shallow-clone-v0-1-0-caveat-auth-share-collapsed-on-current-
+      - shallow-clone-strip-from-pp-persona-run-budget-exposure-text
+      - spec-shallow-clone
+    spec: docs/specs/shallow-clone.md
+    related_commits:
+      - ref: ccc9966
+        note: shallow-clone feature shipped; caveat text was wrong at time of writing
+      - ref: 45f631c
+        note: spec adopted (status draft → adopted); no auth smoke test before adoption
+      - ref: 6f10bcb
+        note: doctor checks Claude Code version for keychain isolation (awareness existed, assumption still wrong)
+
+    what_happened: |
+      Shallow clones were designed to give orchestrators (pp persona run,
+      textlives, CI runners) pre-authenticated disposable Claude Code config
+      dirs. The spec's Caveats section said:
+
+        "The clone inherits OAuth tokens embedded in the copied .claude.json
+        and works until next refresh, after which it diverges."
+
+      That sentence was wrong. On current Claude Code (confirmed v2.1.56+),
+      OAuth tokens are stored exclusively in macOS Keychain, keyed by
+      sha256(CLAUDE_CONFIG_DIR)[:8]. The .claude.json file contains only
+      identity metadata (accountUuid, emailAddress, organizationName,
+      billingType) — no accessToken, no refreshToken, no apiKey.
+
+      A shallow clone gets a new CLAUDE_CONFIG_DIR → new Keychain key →
+      no matching Keychain entry → "Not logged in · Please run /login"
+      on the very first request. Not at next refresh. Immediately.
+
+    how_it_slipped_through: |
+      1. The wrong assumption was baked into the spec from day one (ccc9966,
+         April 26). The author believed tokens were still in .claude.json
+         "until next refresh" on v2.1.56+. They are not.
+
+      2. The 72 tests shipped with ccc9966 cover lifecycle correctly
+         (create, gc, destroy, manifest fields, audit log, registry
+         round-trips) but none of them spawn a real `claude` process against
+         a cloned profile and verify API reachability. The auth test
+         would have caught this immediately.
+
+      3. The smoke tests (scripts/manual-smoke.sh, docs/SMOKETESTS.yaml)
+         stopped at "does the clone directory exist and look right" — not
+         "does a process running against this directory reach the API."
+
+      4. The spec was adopted on April 27 (one day after shipping) against
+         textprompts sign-off. First real-world use was April 30 when
+         textprompts wired pp persona run to use it for a live textbridge
+         run. Three days between adoption and first real test.
+
+    current_state: |
+      textprompts v0.10.10 (May 4) stripped shallow-clone from pp persona run.
+      Workers now receive the parent profile's CLAUDE_CONFIG_DIR directly via
+      env injection — no clone, no ephemeral lifecycle, no isolation.
+
+      Consequence: workers share auth and budget with the parent profile.
+      A runaway worker burns the parent's quota with no cap and no telemetry
+      separation. This is the "budget exposure" documented in the pinned
+      forum thread (pinned until 2026-08-01).
+
+    resolution_paths: |
+      Option A — textprompts-side budget guard (interim):
+        Add --max-budget-usd to pp persona run. Hard-kills the worker
+        subprocess via Claude Code's budget primitive (if exposed).
+        Guard-rail, not isolation. Can ship without textaccounts changes.
+
+      Option B — Keychain-aware shallow clone (proper fix):
+        textaccounts create --shallow --from <parent> reads the parent's
+        Keychain entry (key: sha256(parent_config_dir)[:8]), computes the
+        new clone's hash key (sha256(clone_config_dir)[:8]), and writes a
+        mirror of the parent's Keychain item under the new key using macOS
+        Keychain APIs (security add-generic-password or Security framework
+        directly). Marks the new entry textaccounts:ephemeral:<clone_name>
+        for cleanup. textaccounts gc / destroy walk the Keychain for matching
+        entries and remove them.
+
+        This restores the v0.1.0 promise on current Claude Code AND gives
+        real per-run auth boundary. It is not small:
+          - Keychain API surface (Security framework or security CLI — decide)
+          - cleanup paths must not leave orphaned Keychain entries
+          - tests across Claude Code versions (what if tokens move again?)
+          - the Keychain entry format may change with Claude Code updates
+
+    what_to_do_next: |
+      1. Decide Option A vs B vs both.
+         Suggested order: A first (unblocks safe daily use of workers),
+         B as a proper fix on the textaccounts roadmap.
+
+      2. For Option B, answer before writing any code:
+         - Use `security` CLI or link Security.framework directly?
+           CLI is simpler and doesn't require entitlements on macOS;
+           framework is more robust (no shell injection risk, no PATH dep).
+         - What is the exact Keychain service name Claude Code uses?
+           Inspect with: security find-generic-password -a <accountName>
+           Or: security dump-keychain 2>/dev/null | grep -A5 claude
+           We need this before we can mirror it.
+         - Does Claude Code rotate tokens on startup, or only on explicit
+           /login? If startup rotation, a mirror that survives process
+           boundaries may need to be refreshed.
+
+      3. Add an auth smoke test to SMOKETESTS.yaml:
+         "spawn claude --version against a freshly-created shallow clone;
+         verify exit code 0 and no 'Not logged in' in output."
+         This is the test that catches this class of bug going forward.
+
+    open_questions:
+      - What exact Keychain service/account string does Claude Code use?
+        Without this, Option B cannot be implemented.
+      - Does the Keychain entry contain a refresh token + access token pair,
+        or only the access token? If refresh-only, the mirror is long-lived.
+        If access+refresh, the mirror needs to be writable on refresh cycles.
+      - Is there a way to run an authenticated claude subprocess without
+        sharing the full parent budget envelope? (e.g. a sub-account,
+        an org-scoped token, or a --max-tokens-per-session flag)
