@@ -124,3 +124,37 @@ investigations:
       - Is there a way to run an authenticated claude subprocess without
         sharing the full parent budget envelope? (e.g. a sub-account,
         an org-scoped token, or a --max-tokens-per-session flag)
+
+    keychain_findings:
+      confirmed_on: "2026-05-05"
+      service_pattern: |
+        Named profiles:  "Claude Code-credentials-<sha256(config_dir)[:8]>"
+        Default profile: "Claude Code-credentials"  (no suffix, special-cased)
+      account: "macOS username (whoami)"
+      hash_verification:
+        - name: personal
+          path: /Users/paulie/.claude-personal
+          hash: "04581ba3"
+          keychain_service: "Claude Code-credentials-04581ba3"
+        - name: work
+          path: /Users/paulie/.claude-work
+          hash: "746292bb"
+          keychain_service: "Claude Code-credentials-746292bb"
+        - name: default
+          path: /Users/paulie/.claude
+          hash: "b944af43"
+          keychain_service: "Claude Code-credentials"  # no suffix
+      mdat_observation: |
+        The mdat (modified date) on both named profiles updates during active
+        use — Claude Code writes back to the Keychain on token refresh.
+        For short-lived shallow clones (typical parallel agent run << 1 hour)
+        this is irrelevant: copy at create, run, destroy before refresh fires.
+        Long-running workers (> 1 hour) are an edge case; acceptable for v1.
+      security_cli_commands:
+        read:  "security find-generic-password -s \"<service>\" -a \"$(whoami)\" -w"
+        write: "security add-generic-password -s \"<service>\" -a \"$(whoami)\" -w \"<data>\""
+        delete: "security delete-generic-password -s \"<service>\" -a \"$(whoami)\""
+      open_questions_resolved: true
+      notes: |
+        No Security.framework entitlements needed. security CLI is sufficient.
+        All three original open questions are now answered. Ready to implement.
