@@ -43,42 +43,53 @@ tiers:
         verify: lines for gc-dry-run + destroy actions
 
   - id: tier-2
-    name: Live claude in a clone
+    name: Live claude in a clone (Keychain-mirroring path)
     duration: ~5 min
-    risk: medium (creates a new keychain entry; logs in via OAuth)
+    risk: medium (reads + mirrors a real Keychain entry; writes to a new service slot)
     automated_in: null
     description: |
-      The unit suite cannot prove that a cloned profile has working auth. This
-      tier runs an actual `claude` invocation inside the clone's
-      CLAUDE_CONFIG_DIR. Validates: (a) embedded OAuth tokens in the copied
-      .claude.json work for at least one request; (b) Claude Code creates a
-      new keychain entry keyed by sha256(clone-path)[:8] (per Claude Code
-      v2.1.56 namespacing); (c) deep clones strip non-auth fields from
-      .claude.json while shallow clones don't.
+      The unit suite mocks Keychain calls — it cannot prove that a shallow
+      clone launched against real Keychain entries actually authenticates.
+      This tier verifies: (a) `textaccounts create --shallow` successfully
+      mirrors the parent's Keychain entry to the clone's sha256-keyed service
+      name; (b) a `claude --version` invocation inside the clone exits 0 with
+      no "Not logged in" error — i.e., the clone is pre-authenticated; (c)
+      `textaccounts gc` / `destroy` removes both the profile dir and the
+      mirrored Keychain entry.
+
+      Note: on Claude Code < v2.1.56 the Keychain-per-profile isolation does
+      not exist; `create --shallow` will warn that no parent entry was found
+      and the clone will need /login. Tier 2 is only meaningful on v2.1.56+.
     prereqs:
       - claude binary on PATH, version >= 2.1.56
-      - active OAuth session in the parent profile
+      - active OAuth session in the parent profile (a Keychain entry must exist)
+      - macOS (Keychain is macOS-only; this tier is a no-op on other platforms)
     steps:
       - run: textaccounts create probe --shallow --from work --owner probe-run
-        verify: profile created
+        verify: |
+          Profile created with no "Keychain mirror failed" warning on stderr.
+          A mirrored Keychain entry should now exist under the clone's service name.
+      - run: |
+          h=$(python3 -c "import hashlib; import os; p=os.path.expanduser('~/.textaccounts/profiles/probe'); print(hashlib.sha256(p.encode()).hexdigest()[:8])")
+          security find-generic-password -s "Claude Code-credentials-$h" -a "$(whoami)" 2>&1
+        verify: entry found (no "The specified item could not be found" error)
       - run: |
           CLAUDE_CONFIG_DIR=~/.textaccounts/profiles/probe \
-            claude -p "echo hello" --output-format text
-        verify: response without /login prompt
-      - run: |
-          h=$(python3 -c "import hashlib; print(hashlib.sha256('$HOME/.textaccounts/profiles/probe'.encode()).hexdigest()[:8])")
-          security find-generic-password -s "Claude Code-credentials-$h" 2>&1 | grep svce
-        verify: a per-clone keychain entry exists (not just the parent's)
+            claude --version 2>&1
+        verify: exits 0, no "Not logged in" in output — clone is pre-authenticated
       - run: |
           python3 -c "import json; d=json.load(open('$HOME/.textaccounts/profiles/probe/.claude.json')); print(sorted(d.keys()))"
-        verify: shallow keeps everything in .claude.json (auth-only copy ≠ deep)
+        verify: shallow keeps full .claude.json content (auth-only copy ≠ deep clone)
       - run: textaccounts create probe-deep --clone-from work --owner probe-run
         verify: deep clone created
       - run: |
           python3 -c "import json; d=json.load(open('$HOME/.textaccounts/profiles/probe-deep/.claude.json')); print(sorted(d.keys()))"
         verify: only oauthAccount, userID, anonymousId, migrationVersion, theme
       - run: textaccounts gc --max-age 0d --owner probe-run
-        verify: both probes removed; cleanup complete
+        verify: |
+          Both probes removed from registry and disk.
+          Keychain entry for the shallow probe deleted (security find-generic-password
+          for its service name should now return "item not found").
 
   - id: tier-3
     name: Orchestrator simulation

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import os
+import platform
 import shutil
 import subprocess
 from datetime import datetime, timezone
@@ -9,6 +11,77 @@ from pathlib import Path
 import click
 
 from textaccounts.config import Profile, ProfileRegistry, extract_email, save_registry
+
+
+# ---------------------------------------------------------------------------
+# macOS Keychain helpers
+# ---------------------------------------------------------------------------
+
+_KEYCHAIN_SERVICE_BASE = "Claude Code-credentials"
+
+
+def _keychain_service_name(config_dir: Path) -> str:
+    """Return the Keychain service name Claude Code uses for config_dir.
+
+    Default profile (~/.claude) uses the bare service name.
+    Named profiles use service-<sha256(path)[:8]>.
+    """
+    default_claude = Path.home() / ".claude"
+    if config_dir.resolve() == default_claude.resolve():
+        return _KEYCHAIN_SERVICE_BASE
+    digest = hashlib.sha256(str(config_dir).encode()).hexdigest()[:8]
+    return f"{_KEYCHAIN_SERVICE_BASE}-{digest}"
+
+
+def _keychain_read(config_dir: Path) -> str | None:
+    """Read the Keychain token JSON for config_dir. Returns None on any failure."""
+    if platform.system() != "Darwin":
+        return None
+    service = _keychain_service_name(config_dir)
+    try:
+        result = subprocess.run(
+            ["security", "find-generic-password", "-s", service, "-a", os.getlogin(), "-w"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
+def _keychain_write(config_dir: Path, data: str) -> bool:
+    """Write token JSON to Keychain for config_dir. Returns True on success."""
+    if platform.system() != "Darwin":
+        return False
+    service = _keychain_service_name(config_dir)
+    try:
+        result = subprocess.run(
+            ["security", "add-generic-password", "-s", service, "-a", os.getlogin(), "-w", data],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def _keychain_delete(config_dir: Path) -> None:
+    """Delete the Keychain entry for config_dir. Best-effort, never raises."""
+    if platform.system() != "Darwin":
+        return
+    service = _keychain_service_name(config_dir)
+    try:
+        subprocess.run(
+            ["security", "delete-generic-password", "-s", service, "-a", os.getlogin()],
+            capture_output=True,
+            timeout=5,
+        )
+    except Exception:
+        pass
 
 
 def validate_config_dir(path: Path) -> bool:
@@ -182,6 +255,25 @@ def create_shallow(
         owner=owner,
     )
     registry.profiles[name] = profile
+
+    # Mirror parent's Keychain entry so the clone is pre-authenticated.
+    # Best-effort: never fail create_shallow if Keychain ops don't work.
+    token_data = _keychain_read(parent.path)
+    if token_data:
+        ok = _keychain_write(dest, token_data)
+        if not ok:
+            click.echo(
+                f"  warning: Keychain mirror failed — clone '{name}' will need /login",
+                err=True,
+            )
+    else:
+        if platform.system() == "Darwin":
+            click.echo(
+                f"  warning: no Keychain entry found for parent '{parent_name}' — "
+                f"clone '{name}' will need /login",
+                err=True,
+            )
+
     return profile
 
 
@@ -373,6 +465,8 @@ def _audit_log(action: str, profile: Profile, reason: str) -> None:
 def _remove_profile(profile: Profile, registry: ProfileRegistry) -> None:
     """Remove a profile dir + registry entry. Caller is responsible for safety
     checks (ephemeral flag, etc.) and audit logging."""
+    if profile.shallow:
+        _keychain_delete(profile.path)
     if profile.path.is_dir():
         shutil.rmtree(profile.path)
     registry.profiles.pop(profile.name, None)

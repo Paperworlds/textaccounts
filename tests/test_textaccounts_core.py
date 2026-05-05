@@ -1,3 +1,7 @@
+import hashlib
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 import click
 
@@ -13,6 +17,7 @@ from textaccounts.core import (
     rename,
     show,
     list_profiles,
+    _keychain_service_name,
 )
 from conftest import make_claude_json, make_registry
 
@@ -386,3 +391,99 @@ def test_list_profiles_returns_all_profiles(tmp_path):
 
     bob = next(p for p in profiles if p["name"] == "bob")
     assert bob["active"] is False
+
+
+# --- Keychain helpers ---
+
+def test_keychain_service_name_default_profile(tmp_path, monkeypatch):
+    """Default profile path gets the bare service name (no suffix)."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    default_dir = tmp_path / ".claude"
+    assert _keychain_service_name(default_dir) == "Claude Code-credentials"
+
+
+def test_keychain_service_name_named_profile(tmp_path):
+    """Named profiles get the sha256-prefixed service name."""
+    named_dir = tmp_path / ".claude-work"
+    expected_hash = hashlib.sha256(str(named_dir).encode()).hexdigest()[:8]
+    expected = f"Claude Code-credentials-{expected_hash}"
+    assert _keychain_service_name(named_dir) == expected
+
+
+# --- create_shallow Keychain mirroring ---
+
+def test_create_shallow_mirrors_keychain_when_parent_has_entry(tmp_path):
+    """create_shallow mirrors the parent's Keychain entry to the clone."""
+    registry, _ = make_registry(tmp_path)
+    parent_dir = tmp_path / "claude-work"
+    parent_dir.mkdir()
+    make_claude_json(parent_dir)
+    registry.profiles["work"] = Profile(name="work", path=parent_dir, email="")
+
+    with patch("textaccounts.core._keychain_read", return_value='{"token":"abc"}') as mock_read, \
+         patch("textaccounts.core._keychain_write", return_value=True) as mock_write:
+        profile = create_shallow("work-bot", "work", registry)
+
+    mock_read.assert_called_once_with(parent_dir)
+    assert mock_write.call_count == 1
+    call_args = mock_write.call_args
+    assert call_args[0][1] == '{"token":"abc"}'
+    # The clone's path should differ from the parent's
+    assert call_args[0][0] != parent_dir
+    assert profile.shallow is True
+
+
+def test_create_shallow_warns_when_keychain_read_returns_none(tmp_path, capsys):
+    """When parent has no Keychain entry on macOS, a warning is emitted."""
+    registry, _ = make_registry(tmp_path)
+    parent_dir = tmp_path / "claude-work"
+    parent_dir.mkdir()
+    make_claude_json(parent_dir)
+    registry.profiles["work"] = Profile(name="work", path=parent_dir, email="")
+
+    with patch("textaccounts.core._keychain_read", return_value=None), \
+         patch("textaccounts.core.platform.system", return_value="Darwin"):
+        profile = create_shallow("work-bot", "work", registry)
+
+    assert profile.shallow is True
+    captured = capsys.readouterr()
+    assert "warning" in captured.err
+    assert "work-bot" in captured.err
+
+
+def test_create_shallow_no_warning_on_non_darwin(tmp_path, capsys):
+    """On non-macOS, no Keychain warning is emitted (expected behaviour)."""
+    registry, _ = make_registry(tmp_path)
+    parent_dir = tmp_path / "claude-work"
+    parent_dir.mkdir()
+    make_claude_json(parent_dir)
+    registry.profiles["work"] = Profile(name="work", path=parent_dir, email="")
+
+    with patch("textaccounts.core._keychain_read", return_value=None), \
+         patch("textaccounts.core.platform.system", return_value="Linux"):
+        profile = create_shallow("work-bot", "work", registry)
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+
+
+def test_destroy_deletes_keychain_entry_for_shallow_profile(tmp_path):
+    """destroy() calls _keychain_delete for shallow profiles."""
+    registry, _ = make_registry(tmp_path)
+    p = _mk_ephemeral(registry, "bot", owner="run-1")
+
+    with patch("textaccounts.core._keychain_delete") as mock_del:
+        destroy("bot", registry)
+
+    mock_del.assert_called_once_with(p.path)
+
+
+def test_gc_deletes_keychain_entry_for_shallow_profiles(tmp_path):
+    """gc() triggers Keychain cleanup for swept shallow profiles."""
+    registry, _ = make_registry(tmp_path)
+    old = _mk_ephemeral(registry, "old", days_old=10)
+
+    with patch("textaccounts.core._keychain_delete") as mock_del:
+        gc(registry, max_age_days=7)
+
+    mock_del.assert_called_once_with(old.path)
