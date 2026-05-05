@@ -1,0 +1,25 @@
+# textaccounts — Testing reference
+# Unit tests: pytest tests/ (excludes test_textaccounts_view.py — needs `textual` installed)
+# Full smoke runbook: docs/SMOKETESTS.yaml
+# Automated smoke script: scripts/manual-smoke.sh (Tier 1 + Tier 3)
+
+unit:
+  run: pytest tests/ --ignore=tests/test_textaccounts_view.py
+  note: test_textaccounts_view.py requires `textual` (uv tool install -e ".[dev]" to get it)
+
+shallow_clone_keychain:
+  description: |
+    Keychain mirroring (Option B, shipped 2ec0098) cannot be fully verified by unit
+    tests because _keychain_read/write/delete are mocked. Before shipping changes to
+    create_shallow, gc, or destroy, run SMOKETESTS.yaml Tier 2 by hand.
+  tier_2_trigger:
+    - Any change to create_shallow, gc, destroy, or the _keychain_* helpers
+    - Any Claude Code version bump that might change the Keychain service-name schema
+    - Any textaccounts release that touches the ephemeral lifecycle
+  tier_2_steps: docs/SMOKETESTS.yaml#tier-2
+  what_to_verify:
+    - create --shallow emits no "Keychain mirror failed" warning on stderr
+    - security find-generic-password for the clone's service name finds an entry
+    - claude --version inside the clone exits 0 with no "Not logged in" in output
+    - textaccounts gc --max-age 0d removes both the profile dir and the Keychain entry
+  platform: macOS only (Keychain is darwin-specific; skip Tier 2 on Linux/CI)
