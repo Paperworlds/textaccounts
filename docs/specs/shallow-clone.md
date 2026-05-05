@@ -143,11 +143,24 @@ A conforming consumer MUST NOT:
 
 ## Caveats
 
-- **Auth share is partial.** Claude Code v2.1.56+ keys keychain entries by
-  `sha256(CLAUDE_CONFIG_DIR)[:8]`, so a shallow clone gets a *new*
-  keychain entry. The clone inherits OAuth tokens embedded in the copied
-  `.claude.json` and works until next refresh, after which it diverges.
-  Long-lived clones may need a separate `/login`.
+- **Auth share via Keychain mirroring (macOS, v2.1.56+).** Claude Code
+  v2.1.56+ stores OAuth tokens exclusively in the macOS Keychain, keyed by
+  `sha256(CLAUDE_CONFIG_DIR)[:8]`. Tokens are **not** embedded in
+  `.claude.json` on current Claude Code — that file contains only identity
+  metadata (accountUuid, emailAddress, etc.). A shallow clone gets a fresh
+  config dir → fresh Keychain key → no entry → immediate "Not logged in"
+  unless the parent's entry is explicitly mirrored.
+
+  `textaccounts create --shallow` (v0.1.1+) handles this by reading the
+  parent's Keychain entry at creation time and writing it under the clone's
+  service name using the `security` CLI. Cleanup (`gc`, `destroy`) removes
+  the mirrored entry. If the mirror fails (no parent entry found, non-macOS,
+  Keychain permission error), a warning is emitted to stderr and the clone
+  falls back to the pre-v0.1.1 behaviour (unauthenticated, needs `/login`).
+
+  On Claude Code versions predating v2.1.56, tokens may be embedded in
+  `.claude.json` and this mirroring step is unnecessary (but harmless).
+
 - **Registry race.** `gc` and `destroy` mutate `profiles.yaml` non-atomically
   with respect to a concurrent shell-side `textaccounts switch`. Out of scope
   for this spec; assume orchestrator runs and human shells don't fight.
@@ -159,9 +172,9 @@ A conforming consumer MUST NOT:
   `gc`).
 - Auto-trigger of `gc` on process exit (lifecycle stays at the orchestration
   layer; textaccounts is just the storage).
-- Per-profile keychain credential mirroring (Claude Code owns that;
-  see `verify-claude-config-dir-keychain-isolation-across-textaccou`
-  thread).
+- Token refresh across long-lived clones (mirrored entry is a snapshot at
+  creation time; clones longer than the OAuth token TTL may need re-login).
+  Deferred to a future spec.
 
 ## Open questions
 
