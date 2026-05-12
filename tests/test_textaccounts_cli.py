@@ -112,7 +112,8 @@ def test_show_default_outputs_unset_line(tmp_path, monkeypatch):
     result = runner.invoke(main, ["show", "default"])
 
     assert result.exit_code == 0
-    assert result.output.strip() == "set -e CLAUDE_CONFIG_DIR"
+    assert "set -e CLAUDE_CONFIG_DIR" in result.output
+    assert "set -e CLAUDE_CODE_OAUTH_TOKEN" in result.output
 
 
 def test_show_no_rich_markup(tmp_path, monkeypatch):

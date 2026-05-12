@@ -84,6 +84,68 @@ def _keychain_delete(config_dir: Path) -> None:
         pass
 
 
+# ---------------------------------------------------------------------------
+# Token-profile Keychain helpers
+# ---------------------------------------------------------------------------
+
+_TOKEN_KEYCHAIN_SERVICE_PREFIX = "textaccounts-oauth-token"
+
+
+def _token_keychain_service_name(profile_name: str) -> str:
+    return f"{_TOKEN_KEYCHAIN_SERVICE_PREFIX}-{profile_name}"
+
+
+def _token_keychain_read(profile_name: str) -> str | None:
+    """Read the CLAUDE_CODE_OAUTH_TOKEN for a token profile. Returns None on failure."""
+    if platform.system() != "Darwin":
+        return None
+    service = _token_keychain_service_name(profile_name)
+    try:
+        result = subprocess.run(
+            ["security", "find-generic-password", "-s", service, "-a", os.getlogin(), "-w"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
+def _token_keychain_write(profile_name: str, token: str) -> bool:
+    """Write the CLAUDE_CODE_OAUTH_TOKEN to Keychain. Returns True on success."""
+    if platform.system() != "Darwin":
+        return False
+    service = _token_keychain_service_name(profile_name)
+    try:
+        result = subprocess.run(
+            ["security", "add-generic-password", "-s", service, "-a", os.getlogin(), "-w", token],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def _token_keychain_delete(profile_name: str) -> None:
+    """Delete the CLAUDE_CODE_OAUTH_TOKEN Keychain entry. Best-effort, never raises."""
+    if platform.system() != "Darwin":
+        return
+    service = _token_keychain_service_name(profile_name)
+    try:
+        subprocess.run(
+            ["security", "delete-generic-password", "-s", service, "-a", os.getlogin()],
+            capture_output=True,
+            timeout=5,
+        )
+    except Exception:
+        pass
+
+
 def validate_config_dir(path: Path) -> bool:
     return (path / ".claude.json").exists()
 
@@ -346,13 +408,31 @@ def show(name: str, registry: ProfileRegistry, shell: str = "fish") -> str:
     if name == "default":
         _write_active_description("")
         if shell == "fish":
-            return "set -e CLAUDE_CONFIG_DIR"
-        return "unset CLAUDE_CONFIG_DIR"
+            return "set -e CLAUDE_CONFIG_DIR\nset -e CLAUDE_CODE_OAUTH_TOKEN"
+        return "unset CLAUDE_CONFIG_DIR\nunset CLAUDE_CODE_OAUTH_TOKEN"
 
     canonical = resolve_profile(name, registry)
     registry.active = canonical
     profile = registry.profiles[canonical]
     _write_active_description(profile.description)
+
+    if profile.auth_method == "token":
+        token = _token_keychain_read(profile.name)
+        if token is None:
+            raise click.UsageError(
+                f"Token profile '{canonical}' has no Keychain entry. "
+                f"Run: textaccounts adopt-token {canonical}"
+            )
+        if shell == "fish":
+            return (
+                f"set -gx CLAUDE_CONFIG_DIR {profile.path}\n"
+                f"set -gx CLAUDE_CODE_OAUTH_TOKEN {token}"
+            )
+        return (
+            f"export CLAUDE_CONFIG_DIR={profile.path}\n"
+            f"export CLAUDE_CODE_OAUTH_TOKEN={token}"
+        )
+
     if shell == "fish":
         return f"set -gx CLAUDE_CONFIG_DIR {profile.path}"
     return f"export CLAUDE_CONFIG_DIR={profile.path}"
@@ -423,6 +503,7 @@ def list_profiles(registry: ProfileRegistry) -> list[dict]:
                 "ephemeral": profile.ephemeral,
                 "owner": profile.owner,
                 "adopted": profile.adopted,
+                "auth_method": profile.auth_method,
             }
         )
     return result
@@ -467,6 +548,8 @@ def _remove_profile(profile: Profile, registry: ProfileRegistry) -> None:
     checks (ephemeral flag, etc.) and audit logging."""
     if profile.shallow:
         _keychain_delete(profile.path)
+    if profile.auth_method == "token":
+        _token_keychain_delete(profile.name)
     if profile.path.is_dir():
         shutil.rmtree(profile.path)
     registry.profiles.pop(profile.name, None)

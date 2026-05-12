@@ -64,6 +64,8 @@ textaccounts create <name> --shallow \
 textaccounts gc [--max-age 7d] \
   [--owner <run-id>] [--dry-run]         # sweep ephemeral profiles older than max-age
 textaccounts destroy <name>              # remove a single ephemeral profile
+textaccounts adopt-token <name> \
+  [--path <dir>]                         # register a token-auth profile (CLAUDE_CODE_OAUTH_TOKEN)
 textaccounts switch <name>               # switch profile (sets CLAUDE_CONFIG_DIR)
 textaccounts show <name>                 # print shell command without executing
 textaccounts rename <old> <new>          # rename a profile
@@ -102,16 +104,43 @@ textaccounts destroy bot-1
 removal is appended to `~/.local/state/textaccounts/gc.log` for auditing.
 
 > [!NOTE]
-> **Auth share is partial.** Claude Code v2.1.56+ keys keychain entries by
-> `sha256(CLAUDE_CONFIG_DIR)[:8]`, so a shallow clone gets a *new* keychain
-> entry. The clone inherits whatever OAuth tokens are embedded in the copied
-> `.claude.json` and works until the next refresh, after which it diverges
-> from the parent. For long-running clones, expect a separate `/login`.
+> **Auth share via Keychain mirroring (v0.1.1+).** Claude Code v2.1.56+ stores
+> OAuth tokens exclusively in the macOS Keychain, keyed by
+> `sha256(CLAUDE_CONFIG_DIR)[:8]`. A shallow clone gets a new config dir and
+> therefore a new key. `textaccounts create --shallow` automatically mirrors
+> the parent's Keychain entry to the clone at creation time; `gc` and `destroy`
+> clean it up. If the parent has no Keychain entry, a warning is emitted and
+> the clone will need `/login`.
 
 > [!NOTE]
 > `--worker` is a deprecated alias for `--shallow`. It still works but emits
 > a one-line warning. The on-disk YAML key was renamed `worker` → `shallow`
 > with read-time backward compat.
+
+## Token-auth profiles
+
+Some Claude accounts use a long-lived `CLAUDE_CODE_OAUTH_TOKEN` (service-account style) instead of the interactive OAuth flow. `textaccounts` supports these as first-class profiles — the token is stored in the macOS Keychain and injected automatically at switch time.
+
+```sh
+# Register a token-auth profile (you will be prompted for the token, no shell history)
+textaccounts adopt-token my-service-account
+
+# Optionally specify a config dir (created if absent)
+textaccounts adopt-token my-service-account --path ~/.claude-svc
+
+# Switch — injects both CLAUDE_CONFIG_DIR and CLAUDE_CODE_OAUTH_TOKEN into your shell
+textaccounts switch my-service-account
+
+# The profile shows [token-auth] in the list
+textaccounts list
+```
+
+The config dir (`~/.claude-<name>` by default) still holds settings, sessions, and MCP config — only the auth part changes. Tooling that calls `env_for_profile("my-service-account")` gets both `CLAUDE_CONFIG_DIR` and `CLAUDE_CODE_OAUTH_TOKEN` automatically.
+
+To rotate the token, run `adopt-token` again with a new value (coming in a future release; for now, delete and re-adopt the profile).
+
+> [!NOTE]
+> Token-auth profiles are macOS-only in v0.1.0 (Keychain is required). Linux support is planned.
 
 ## Per-profile descriptions
 

@@ -122,6 +122,56 @@ tiers:
       - run: tail -20 ~/.local/state/textaccounts/gc.log
         verify: ~7 audit lines from this exercise (5 batch gc + 1 orphan gc + 1 destroy refusal — last one is NOT logged because it errored before _audit_log)
 
+  - id: tier-2b
+    name: Token-profile adopt + env injection + destroy
+    duration: ~3 min
+    risk: medium (writes a real Keychain entry; reads it back; cleans up)
+    automated_in: null
+    description: |
+      Verifies the token-auth profile path end-to-end:
+        (a) `textaccounts adopt-token` stores the token in Keychain;
+        (b) `env_for_profile` returns CLAUDE_CODE_OAUTH_TOKEN from Keychain;
+        (c) `claude --version` run with that env exits 0 (proves the token is valid);
+        (d) `textaccounts gc` / `destroy` removes the Keychain entry.
+
+      Note: this tier requires a real CLAUDE_CODE_OAUTH_TOKEN value. The test
+      does NOT verify that the token grants any specific Claude access — only
+      that the CLI plumbing is wired up and Keychain round-trips cleanly.
+    prereqs:
+      - macOS (Keychain is macOS-only)
+      - a valid CLAUDE_CODE_OAUTH_TOKEN value to test with
+    steps:
+      - run: |
+          textaccounts adopt-token smoke-token-test
+          # When prompted, paste a real CLAUDE_CODE_OAUTH_TOKEN value.
+        verify: |
+          "Registered token profile smoke-token-test" printed.
+          A Keychain entry under "textaccounts-oauth-token-smoke-token-test" exists:
+            security find-generic-password -s "textaccounts-oauth-token-smoke-token-test" -a "$(whoami)" 2>&1
+      - run: textaccounts list
+        verify: row shows "[token-auth]" tag next to smoke-token-test
+      - run: |
+          python3 -c "
+          from textaccounts.api import env_for_profile
+          import json
+          print(json.dumps(env_for_profile('smoke-token-test'), indent=2))
+          "
+        verify: |
+          Output contains both CLAUDE_CONFIG_DIR and CLAUDE_CODE_OAUTH_TOKEN keys.
+          The token value matches what was entered during adopt-token.
+      - run: |
+          env_json=$(python3 -c "from textaccounts.api import env_for_profile; import json; print(json.dumps(env_for_profile('smoke-token-test')))")
+          CLAUDE_CONFIG_DIR=$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['CLAUDE_CONFIG_DIR'])" "$env_json") \
+          CLAUDE_CODE_OAUTH_TOKEN=$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['CLAUDE_CODE_OAUTH_TOKEN'])" "$env_json") \
+            claude --version 2>&1
+        verify: exits 0; no "Not logged in" in output
+      - run: textaccounts destroy smoke-token-test
+        verify: |
+          "Destroyed smoke-token-test" printed.
+          Keychain entry is gone:
+            security find-generic-password -s "textaccounts-oauth-token-smoke-token-test" -a "$(whoami)" 2>&1
+            # Should output "The specified item could not be found."
+
   - id: bonus-legacy-yaml
     name: Backward-compat read of legacy worker key
     duration: 30s

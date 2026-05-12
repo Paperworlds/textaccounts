@@ -131,6 +131,29 @@ class TestEnvForProfile:
             with pytest.raises(ValueError, match="not found"):
                 env_for_profile("nope")
 
+    def test_token_profile_injects_oauth_token(self):
+        profiles = {
+            "svc": Profile(name="svc", path=Path("/tmp/svc"), email="", auth_method="token"),
+        }
+        with patch("textaccounts.api.load_registry") as mock_reg, \
+             patch("textaccounts.api._token_keychain_read", return_value="tok-abc"):
+            mock_reg.return_value = ProfileRegistry(profiles=profiles)
+            from textaccounts.api import env_for_profile
+            result = env_for_profile("svc")
+        assert result["CLAUDE_CONFIG_DIR"] == "/tmp/svc"
+        assert result["CLAUDE_CODE_OAUTH_TOKEN"] == "tok-abc"
+
+    def test_token_profile_raises_when_no_keychain_entry(self):
+        profiles = {
+            "svc": Profile(name="svc", path=Path("/tmp/svc"), email="", auth_method="token"),
+        }
+        with patch("textaccounts.api.load_registry") as mock_reg, \
+             patch("textaccounts.api._token_keychain_read", return_value=None):
+            mock_reg.return_value = ProfileRegistry(profiles=profiles)
+            from textaccounts.api import env_for_profile
+            with pytest.raises(ValueError, match="adopt-token"):
+                env_for_profile("svc")
+
 
 class TestGetProfileLineage:
     def test_returns_full_lineage_for_shallow_ephemeral(self):

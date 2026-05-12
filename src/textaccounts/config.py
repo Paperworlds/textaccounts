@@ -23,6 +23,7 @@ class Profile:
     description: str = ""
     ephemeral: bool = False
     owner: str = ""
+    auth_method: str = "oauth"
 
 
 @dataclass
@@ -67,6 +68,7 @@ def load_registry(config_path: Path = CONFIG_PATH) -> ProfileRegistry:
             description=entry.get("description", ""),
             ephemeral=entry.get("ephemeral", False),
             owner=entry.get("owner", ""),
+            auth_method=entry.get("auth_method", "oauth"),
         )
 
     return ProfileRegistry(
@@ -97,6 +99,8 @@ def save_registry(registry: ProfileRegistry, config_path: Path = CONFIG_PATH) ->
             entry["ephemeral"] = True
         if profile.owner:
             entry["owner"] = profile.owner
+        if profile.auth_method != "oauth":
+            entry["auth_method"] = profile.auth_method
         profiles_data[name] = entry
 
     data: dict = {"version": "1.0"}

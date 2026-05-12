@@ -43,6 +43,62 @@ def adopt(name: str, path: str) -> None:
     )
 
 
+@main.command("adopt-token")
+@click.argument("name")
+@click.option("--path", "profile_path", default=None, type=click.Path(),
+              help="Config dir to use (created if absent). Defaults to ~/.claude-<name>.")
+def adopt_token(name: str, profile_path: str | None) -> None:
+    """Register a profile that authenticates via CLAUDE_CODE_OAUTH_TOKEN.
+
+    The token is stored in the macOS Keychain (never in profiles.yaml).
+    Run this command again to rotate the token.
+    """
+    import platform as _platform
+    if _platform.system() != "Darwin":
+        raise click.UsageError("adopt-token is macOS-only in v0.1.0 (Keychain is required).")
+
+    registry = load_registry()
+    if name in registry.profiles:
+        raise click.UsageError(f"Profile '{name}' already exists. Use adopt-token to overwrite the token only.")
+
+    dest = Path(profile_path).expanduser().resolve() if profile_path else Path.home() / f".claude-{name}"
+    if not dest.exists():
+        dest.mkdir(parents=True)
+        console.print(f"[dim]Created config dir: {dest}[/dim]")
+    elif not dest.is_dir():
+        raise click.UsageError(f"Path exists but is not a directory: {dest}")
+
+    # Create a minimal .claude.json if absent so the dir passes validate_config_dir.
+    claude_json = dest / ".claude.json"
+    if not claude_json.exists():
+        import json as _json
+        claude_json.write_text(_json.dumps({}))
+
+    token = click.prompt("CLAUDE_CODE_OAUTH_TOKEN", hide_input=True)
+    if not token.strip():
+        raise click.UsageError("Token must not be empty.")
+
+    ok = core._token_keychain_write(name, token.strip())
+    if not ok:
+        raise click.ClickException("Failed to write token to Keychain.")
+
+    from textaccounts.config import Profile
+    from datetime import datetime, timezone
+    profile = Profile(
+        name=name,
+        path=dest,
+        email="",
+        adopted=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        auth_method="token",
+    )
+    registry.profiles[name] = profile
+    save_registry(registry)
+    console.print(
+        f"[green]Registered[/green] token profile [bold]{name}[/bold] → {dest}"
+    )
+    console.print(f"[dim]Token stored in Keychain as: {core._token_keychain_service_name(name)}[/dim]")
+
+
 @main.command("create")
 @click.argument("name")
 @click.option("--shallow", "shallow", is_flag=True,
@@ -138,6 +194,8 @@ def list_cmd() -> None:
         tag_parts: list[str] = []
         if p["shallow"]:
             tag_parts.append("\\[shallow]")
+        if p.get("auth_method") == "token":
+            tag_parts.append("\\[token-auth]")
         if p.get("ephemeral"):
             tag_parts.append("\\[ephemeral]")
         if p.get("owner"):

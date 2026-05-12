@@ -18,7 +18,7 @@ from pathlib import Path
 import click
 
 from textaccounts.config import load_registry
-from textaccounts.core import resolve_profile
+from textaccounts.core import resolve_profile, _token_keychain_read
 
 
 def available() -> bool:
@@ -103,4 +103,13 @@ def env_for_profile(name: str) -> dict[str, str]:
         raise ValueError(f"Profile '{name}' not found.") from None
 
     profile = registry.profiles[canonical]
-    return {"CLAUDE_CONFIG_DIR": str(profile.path)}
+    env: dict[str, str] = {"CLAUDE_CONFIG_DIR": str(profile.path)}
+    if profile.auth_method == "token":
+        token = _token_keychain_read(profile.name)
+        if token is None:
+            raise ValueError(
+                f"Token profile '{canonical}' has no Keychain entry. "
+                f"Run: textaccounts adopt-token {canonical}"
+            )
+        env["CLAUDE_CODE_OAUTH_TOKEN"] = token
+    return env

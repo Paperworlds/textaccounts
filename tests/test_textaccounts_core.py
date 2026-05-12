@@ -18,6 +18,10 @@ from textaccounts.core import (
     show,
     list_profiles,
     _keychain_service_name,
+    _token_keychain_service_name,
+    _token_keychain_read,
+    _token_keychain_write,
+    _token_keychain_delete,
 )
 from conftest import make_claude_json, make_registry
 
@@ -157,7 +161,8 @@ def test_show_to_default_returns_unset_line(tmp_path):
     registry, _ = make_registry(tmp_path)
 
     line = show("default", registry)
-    assert line == "set -e CLAUDE_CONFIG_DIR"
+    assert "set -e CLAUDE_CONFIG_DIR" in line
+    assert "set -e CLAUDE_CODE_OAUTH_TOKEN" in line
 
 
 def test_show_updates_active_in_registry(tmp_path):
@@ -487,3 +492,99 @@ def test_gc_deletes_keychain_entry_for_shallow_profiles(tmp_path):
         gc(registry, max_age_days=7)
 
     mock_del.assert_called_once_with(old.path)
+
+
+# --- _token_keychain_* helpers ---
+
+def test_token_keychain_service_name():
+    assert _token_keychain_service_name("myprofile") == "textaccounts-oauth-token-myprofile"
+
+
+# --- show with token profile ---
+
+def test_show_token_profile_emits_both_env_vars(tmp_path):
+    registry, _ = make_registry(tmp_path)
+    p_dir = tmp_path / "claude-svc"
+    p_dir.mkdir()
+    make_claude_json(p_dir)
+    registry.profiles["svc"] = Profile(name="svc", path=p_dir, email="", auth_method="token")
+
+    with patch("textaccounts.core._token_keychain_read", return_value="mytoken123"):
+        line = show("svc", registry)
+
+    assert f"CLAUDE_CONFIG_DIR" in line
+    assert str(p_dir) in line
+    assert "CLAUDE_CODE_OAUTH_TOKEN" in line
+    assert "mytoken123" in line
+
+
+def test_show_token_profile_raises_when_no_keychain_entry(tmp_path):
+    registry, _ = make_registry(tmp_path)
+    p_dir = tmp_path / "claude-svc"
+    p_dir.mkdir()
+    make_claude_json(p_dir)
+    registry.profiles["svc"] = Profile(name="svc", path=p_dir, email="", auth_method="token")
+
+    with patch("textaccounts.core._token_keychain_read", return_value=None):
+        with pytest.raises(click.UsageError, match="adopt-token"):
+            show("svc", registry)
+
+
+# --- _remove_profile for token profile ---
+
+def _mk_token_profile(registry: ProfileRegistry, name: str, tmp_path: Path) -> Profile:
+    p_dir = tmp_path / f"claude-{name}"
+    p_dir.mkdir()
+    make_claude_json(p_dir)
+    from datetime import datetime, timezone
+    profile = Profile(
+        name=name,
+        path=p_dir,
+        email="",
+        adopted=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        auth_method="token",
+        ephemeral=True,
+        owner="test-run",
+    )
+    registry.profiles[name] = profile
+    return profile
+
+
+def test_remove_token_profile_calls_token_keychain_delete(tmp_path):
+    """_remove_profile deletes token Keychain entry for token profiles."""
+    registry, _ = make_registry(tmp_path)
+    profile = _mk_token_profile(registry, "svc", tmp_path)
+
+    with patch("textaccounts.core._token_keychain_delete") as mock_del, \
+         patch("textaccounts.core._keychain_delete") as mock_cc_del:
+        destroy("svc", registry)
+
+    mock_del.assert_called_once_with("svc")
+    mock_cc_del.assert_not_called()
+
+
+def test_remove_shallow_token_profile_calls_both_deletes(tmp_path):
+    """A shallow+token profile cleans up both Keychain entries."""
+    registry, _ = make_registry(tmp_path)
+    p_dir = tmp_path / "claude-hybrid"
+    p_dir.mkdir()
+    make_claude_json(p_dir)
+    from datetime import datetime, timezone
+    profile = Profile(
+        name="hybrid",
+        path=p_dir,
+        email="",
+        adopted=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        auth_method="token",
+        shallow=True,
+        ephemeral=True,
+        owner="test",
+    )
+    registry.profiles["hybrid"] = profile
+
+    with patch("textaccounts.core._token_keychain_delete") as mock_tok, \
+         patch("textaccounts.core._keychain_delete") as mock_cc:
+        destroy("hybrid", registry)
+
+    mock_tok.assert_called_once_with("hybrid")
+    mock_cc.assert_called_once_with(p_dir)
