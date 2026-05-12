@@ -20,7 +20,9 @@ token_profiles:
   what_to_verify:
     - adopt-token writes Keychain entry; security find-generic-password finds it
     - env_for_profile returns both CLAUDE_CONFIG_DIR and CLAUDE_CODE_OAUTH_TOKEN
-    - claude --version with that env exits 0
+    - claude --print "hi" with that env returns a response (not a login error)
+    - NOTE: CLAUDE_CODE_OAUTH_TOKEN only works non-interactively; interactive
+      sessions (claude with no flags) ignore it and check Keychain instead
     - destroy removes the Keychain entry (security find: item not found afterward)
   platform: macOS only
 

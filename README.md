@@ -139,6 +139,9 @@ The config dir (`~/.claude-<name>` by default) still holds settings, sessions, a
 
 To rotate the token, run `adopt-token` again with a new value (coming in a future release; for now, delete and re-adopt the profile).
 
+> [!IMPORTANT]
+> **Non-interactive use only.** `CLAUDE_CODE_OAUTH_TOKEN` is honoured by Claude Code only for non-interactive invocations (`claude --print` / `claude -p`). Interactive terminal sessions (`claude` with no flags, `ts new`) ignore this env var and check the macOS Keychain instead — if no Keychain entry exists they show the login screen. Token-auth profiles are designed for agent/scripted workloads (textlives, textprompts, `claude -p` pipelines), not for shell switching via `ta switch`.
+
 > [!NOTE]
 > Token-auth profiles are macOS-only in v0.1.0 (Keychain is required). Linux support is planned.
 
