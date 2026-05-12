@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.5.0
+
+- feat(core): token-auth profiles via `CLAUDE_CODE_OAUTH_TOKEN` — non-interactive profiles for automated sessions
+- feat(core): Keychain-aware shallow clones — `create --shallow-from <src>` copies profile config without sensitive secrets
+- feat(api): `get_profile_lineage` + supersedes api v0.1.0 → v0.2.0
+- feat: shallow clone ephemeral lifecycle (gc, destroy)
+- docs: `TESTING.yaml` smoke-test runbook
+
 ## v0.4.1
 
 - feat: `textaccounts create --clone-from <src>` for clean profile clones
