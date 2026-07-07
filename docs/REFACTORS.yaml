@@ -1,0 +1,281 @@
+# REFACTORS.yaml — textaccounts pre-1.0 cleanup plan
+#
+# Scoped to obvious wins across core.py / cli.py / config.py / api.py.
+# Goal: ship v1.0 with a tighter, more honest internal structure. No
+# behavior changes for users; tests stay green throughout.
+#
+# Ordering: each item is independently shippable. Pick by risk/reward,
+# not by index. Bugs (B*) first, structural (S*) next, ergonomic (E*) last.
+
+version: 1
+target_release: v1.0.0
+planned_in:
+  session: 2375fb90-b4c1-4c01-9fd8-d438e2f8235f
+  date: 2026-05-17
+baseline:
+  core_loc: 786
+  cli_loc:  855
+  config_loc: 172
+  api_loc:  123
+  tests_passing: 113
+
+# ---------------------------------------------------------------------------
+# Bugs surfaced while reading — fix before refactoring around them
+# ---------------------------------------------------------------------------
+
+bugs:
+
+  B1_rename_drops_fields:
+    where: core.py:354 (rename)
+    smell: |
+      Manually unpacks Profile field-by-field into a new Profile. Misses
+      `auth_method` and `signing` — a token profile with signing config
+      loses both on rename.
+    fix: |
+      Replace the manual repack with `dataclasses.replace(profile, name=new_name)`.
+      Drops 12 lines and is forward-compatible with any new field added later.
+    risk: low
+    test: add test_rename_preserves_auth_method_and_signing
+
+  B2_import_drops_fields:
+    where: core.py:756-783 (import_profiles)
+    smell: |
+      Reconstructs Profile from YAML but omits `ephemeral`, `owner`, `signing`.
+      Re-importing an export silently loses these.
+    fix: |
+      After landing S3 (Profile.from_dict on the dataclass), import_profiles
+      delegates to it — single source of truth for YAML→Profile.
+    risk: low (blocked-by: S3)
+    test: round-trip export/import preserves every Profile field
+
+  B3_signing_unset_no_shell_effect:
+    where: cli.py:352 (signing unset)
+    smell: |
+      Removes signing config + deletes <profile>/gitconfig, but the current
+      shell still has GIT_CONFIG_GLOBAL pointing at the now-missing file.
+      Git will silently fall back to NO global config (worse than ~/.gitconfig).
+    fix: |
+      Print a hint after unset: "Run `ta switch <profile>` to refresh this
+      shell." Alternatively, generate a no-op gitconfig (only the [include]
+      line) so existing shells still chain to ~/.gitconfig.
+    risk: low
+    test: signing unset prints the hint when --shell hint is on
+
+# ---------------------------------------------------------------------------
+# Structural — cohesion + module boundaries
+# ---------------------------------------------------------------------------
+
+structural:
+
+  S1_dedupe_keychain_helpers:
+    where: core.py:21-147
+    smell: |
+      Two near-identical 60-line blocks: _keychain_{read,write,delete}
+      (Claude Code service) and _token_keychain_{read,write,delete}
+      (textaccounts token service). Same shape, same error handling,
+      same Darwin guard. ~120 LoC of copy-paste.
+    fix: |
+      Extract a single `_security(action: str, service: str, data: str | None) -> str | None`
+      that wraps the `security` CLI. The two service-naming helpers stay;
+      everything else collapses to one-liners.
+    risk: low
+    impact: -80 LoC in core.py, single place to fix Keychain bugs
+    test: existing keychain tests cover; no new tests needed
+
+  S2_extract_shell_templates:
+    where: cli.py:456-569, 744-782
+    smell: |
+      ~180 lines of fish/bash/zsh template strings live as module-level
+      constants inside cli.py. They have nothing to do with click; they
+      bloat the CLI module and force re-reading every time you touch a
+      command.
+    fix: |
+      Move to `textaccounts/shell_templates.py` (or a `templates/` dir
+      with `<shell>.{fish,bash,zsh}` text files loaded via importlib.resources).
+      cli.py imports {FISH_FUNCTION, FISH_CLICK_WRAPPER, BASH_FUNCTION, ...}.
+    risk: low
+    impact: cli.py drops to ~670 LoC; templates become diffable in isolation
+    test: existing install tests cover
+
+  S3_profile_serialization_on_dataclass:
+    where: config.py (Profile, load_registry, save_registry)
+    smell: |
+      `load_registry` has 30 lines of dict→Profile construction;
+      `save_registry` has 30 lines of Profile→dict serialization.
+      Each new field requires touching both functions (B2 is exactly
+      this bug). Field list lives in three places: dataclass, load, save.
+    fix: |
+      Add `Profile.from_dict(name, entry) -> Profile` and
+      `Profile.to_dict() -> dict` as classmethods. load_registry/save_registry
+      become thin wrappers iterating profiles. Same for SigningConfig.
+    risk: low
+    impact: -40 LoC in config.py, one place to add a field
+    test: existing config round-trip tests cover
+
+  S4_unify_env_and_shell_emit:
+    where: core.py:455 (show), api.py:92 (env_for_profile)
+    smell: |
+      Both compute "what env vars activate this profile" but produce
+      different outputs (shell string vs dict). The logic for adding
+      CLAUDE_CONFIG_DIR, OAUTH_TOKEN, GIT_CONFIG_GLOBAL is duplicated.
+      Drift risk: B3 happened partly because show() and env_for_profile()
+      have separate code paths.
+    fix: |
+      Single `compute_env(profile) -> dict[str, str | None]` (None = unset).
+      `show()` becomes pure rendering: dict → shell syntax.
+      `env_for_profile()` filters None and returns the dict.
+    risk: medium (touches the activation hot path — needs careful test coverage)
+    impact: dedup, ~30 LoC saved, future env vars added once
+    test: existing show/env tests cover both code paths; add a parity test
+          asserting compute_env keys == set of vars show() emits
+
+  S5_move_adopt_token_to_core:
+    where: cli.py:62-115 (adopt_token)
+    smell: |
+      50 lines of business logic in a CLI handler: dir creation, .claude.json
+      seeding, Keychain write, Profile construction, registry mutation.
+      cli.py should orchestrate; core.py should own the operation.
+    fix: |
+      Move the body to `core.adopt_token(name, dest, token, registry) -> Profile`.
+      CLI handler shrinks to ~15 lines (arg parsing + prompts + console output).
+    risk: low
+    impact: cli.py -35 LoC, testable without click.testing.CliRunner
+    test: add test_core_adopt_token covering the happy path + duplicate name
+
+  S6_api_no_private_imports:
+    where: api.py:21 (`from textaccounts.core import ..., _token_keychain_read`)
+    smell: |
+      api.py is the stable contract. It imports a private symbol
+      (`_token_keychain_read`) from core. Any rename in core breaks the API.
+    fix: |
+      Either (a) promote `_token_keychain_read` to public `token_for_profile`
+      in core, or (b) compute env in core (via S4's compute_env) and let api.py
+      consume only that.
+      Prefer (b): api.py then depends on one core function, not three.
+    risk: low (blocked-by: S4)
+    test: import-graph test asserting api.py touches only public core symbols
+
+# ---------------------------------------------------------------------------
+# Ergonomic — reduce friction, no architectural change
+# ---------------------------------------------------------------------------
+
+ergonomic:
+
+  E1_with_registry_decorator:
+    where: cli.py (most commands)
+    smell: |
+      Every command opens with `registry = load_registry()` and many end
+      with `save_registry(registry)`. ~14 repetitions. Easy to forget the
+      save (a bug class waiting to happen).
+    fix: |
+      `@with_registry` decorator that loads, passes as kwarg, saves on
+      successful return. Read-only commands use `@with_registry(save=False)`.
+    risk: medium (decorators + click can interact awkwardly with type hints)
+    impact: -1 line per command, harder to forget save
+    test: existing CLI tests cover; add test for exception path (no save)
+    note: skip if the click+decorator interaction gets ugly — the win is
+          small enough that it's not worth fighting the framework.
+
+  E2_completion_helper_uses_repos:
+    where: cli.py:479 (__textaccounts_profiles in fish/bash/zsh)
+    smell: |
+      Three separate shell snippets (awk for fish, grep+sed for bash, zsh
+      array slicing) parse profiles.yaml directly to enumerate names.
+      They drift from registry shape (B happened once already — see #3
+      landmine in COMPLETIONS.md). We already ship `textaccounts repos`
+      that prints parseable lines.
+    fix: |
+      Replace the three YAML-parsing snippets with a single shell-agnostic
+      call: `textaccounts repos | awk '{print $2}'`. Same call works in all
+      three shells. If startup cost becomes a problem, add a
+      `--names-only` flag to repos for sub-100ms completion.
+    risk: low
+    impact: -40 LoC of shell scripts, completion immune to YAML format changes
+    test: smoke test: `textaccounts repos | wc -l` matches `len(registry.profiles)`
+
+  E3_promote_local_imports:
+    where: cli.py (desc, repos_cmd, gc) and api.py (active_profile, env_for_profile)
+    smell: |
+      `from textaccounts.core import active_profile_from_env` and
+      `from textaccounts.core import write_profile_gitconfig` appear as
+      function-local imports. Slows nothing measurable, but obscures the
+      dependency graph.
+    fix: |
+      Hoist to module top. Only keep local imports where there's a real
+      reason (avoiding a cycle, or a heavy optional dep like textual).
+    risk: trivial
+    impact: readability
+
+  E4_drop_dead_aliases:
+    where: core.py:344 (create_worker)
+    smell: |
+      `create_worker` is a deprecated alias for `create_shallow`. The CLI
+      already migrated (--worker → --shallow with deprecation warning).
+      v1.0 is a fine place to drop the Python alias too.
+    fix: |
+      Delete `create_worker`. CHANGELOG entry under v1.0 breaking changes.
+      Same for the `worker` backward-compat alias in load_registry
+      (config.py:70) if no real YAMLs still use it.
+    risk: low (verify no consumer imports create_worker)
+    impact: -5 LoC
+
+  E5_centralize_max_age_parsing:
+    where: cli.py:640 (gc handler parses "<N>d")
+    smell: |
+      The "<N>d" format is parsed inline in the CLI. If we ever add "12h"
+      or "2w", the parser duplicates. Trivial now, easier to extend later.
+    fix: |
+      `core.parse_max_age(s: str) -> int` returning days (or seconds, if
+      we want sub-day in the future). CLI calls it; raises click.UsageError
+      on bad input.
+    risk: trivial
+    impact: extensibility
+    note: low-priority — only do this if/when we actually add another unit.
+
+# ---------------------------------------------------------------------------
+# Out of scope (intentional non-goals for v1.0)
+# ---------------------------------------------------------------------------
+
+non_goals:
+  - Splitting view.py — Textual UI is self-contained, no obvious wins.
+  - Plugin architecture for shells. Three shells, two installers, fine as-is.
+  - Async / parallel `du` for list_profiles. Already fast enough after the
+    home-dir guard fix (v0.5.3); revisit only if a user has 50+ profiles.
+  - Replacing pyyaml with a typed loader. Not painful enough to justify the
+    dep churn.
+  - Switching from click to typer/argparse. Click is doing its job.
+
+# ---------------------------------------------------------------------------
+# Suggested apply order (3 small PRs, each independently reviewable)
+# ---------------------------------------------------------------------------
+
+apply_order:
+  pr_1_bugs_and_cohesion:
+    - B1_rename_drops_fields
+    - S3_profile_serialization_on_dataclass
+    - B2_import_drops_fields        # unlocked by S3
+    - S1_dedupe_keychain_helpers
+    rationale: pure wins, no API surface change, tests should stay green.
+
+  pr_2_module_boundaries:
+    - S2_extract_shell_templates
+    - S5_move_adopt_token_to_core
+    - S4_unify_env_and_shell_emit
+    - S6_api_no_private_imports     # unlocked by S4
+    - B3_signing_unset_no_shell_effect
+    rationale: bigger surface, but each piece is mechanical.
+
+  pr_3_polish:
+    - E2_completion_helper_uses_repos
+    - E3_promote_local_imports
+    - E4_drop_dead_aliases
+    - E1_with_registry_decorator    # optional — drop if click fights back
+    - E5_centralize_max_age_parsing # optional
+    rationale: nice-to-have; safe to ship v1.0 without if time is tight.
+
+# Definition of done for the refactor pass:
+#   - all 113 existing tests pass
+#   - new tests for B1/B2/S4 parity
+#   - cli.py < 700 LoC, core.py < 700 LoC (current: 855 / 786)
+#   - api.py imports no private symbols from core
+#   - CHANGELOG v1.0.0 entry lists S* + B* changes

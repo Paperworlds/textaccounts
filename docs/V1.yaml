@@ -1,0 +1,156 @@
+# V1.yaml — textaccounts v1.0.0 release plan
+#
+# Pre-release cleanup (REFACTORS.yaml) is done at v0.7.3.
+# This file tracks what remains before the public v1.0 tag.
+
+version: 1
+target_release: v1.0.0
+planned_in:
+  date: 2026-05-18
+
+# ---------------------------------------------------------------------------
+# Release hygiene (before tagging v1.0.0)
+# ---------------------------------------------------------------------------
+
+release_hygiene:
+
+  H1_squash_history:
+    what: |
+      Squash all pre-v1 commits into a single "initial commit" before the
+      public release tag. The repo is currently private; no one has cloned it.
+    why: |
+      History contains commits authored as paolo@paradigm.co (work Claude
+      profile was active during the session — see git_profile_decoupling
+      below). Squashing gives us a clean, correctly-attributed starting point
+      without surgical per-commit rewrites.
+    how: |
+      1. Resolve the correct git author identity (see H2)
+      2. git reset --soft <root>  (or orphan branch approach)
+      3. git commit --author "..." -m "feat: textaccounts v1.0.0 — initial release"
+      4. git push --force
+    status: pending
+
+  H2_correct_git_identity:
+    what: |
+      All commits in the current history are authored as paolo@paradigm.co /
+      signed by the Paradex key — because the work Claude profile was active
+      in that shell, injecting GIT_CONFIG_GLOBAL to the work gitconfig.
+    resolution: |
+      The squash (H1) replaces all commits with a single new one. The new
+      commit must use the paperworlds git identity, not the work one.
+      Author: Paolo D'Onorio De Meo <p.donorio.demeo@gmail.com>
+    status: blocked_by: H1
+
+  H3_no_claude_coauthor:
+    what: |
+      Stop adding "Co-Authored-By: Claude Sonnet X.X <noreply@anthropic.com>"
+      to commits in this repo going forward.
+    why: |
+      The public repo should read as the author's own work. Co-author lines
+      are useful internally but noisy on public commit history.
+    status: pending
+
+# ---------------------------------------------------------------------------
+# Feature: git profile decoupling
+# ---------------------------------------------------------------------------
+#
+# Root cause of H2: textaccounts bundles Claude account identity with git
+# author identity. The signing block on a Profile writes a gitconfig that
+# sets user.name + user.email — so switching Claude profiles also switches
+# your git identity, globally, for every repo in that shell.
+#
+# The fix: git identity becomes a first-class, separately-selectable concept.
+
+features:
+
+  F1_git_profile_decoupling:
+    problem: |
+      Currently: Claude profile (who you are to claude.ai) == git identity
+      (who you are to git/GitHub), because signing config lives on the Profile.
+
+      Consequence: using a work Claude account on a personal repo causes
+      commits to appear from the work GitHub account. This is what happened
+      to the textaccounts repo itself.
+
+    desired_behaviour: |
+      Claude profile and git identity are independently selectable.
+      - Default: each Claude profile declares a preferred git profile
+      - Override: caller can specify a different git profile at session start
+      - No override needed: using work Claude + personal git just works
+
+    api:
+      textsessions_primary: |
+        ts new --profile work --git-profile pdonorio
+        # work Claude account, but commits as pdonorio git identity
+      textaccounts_optional: |
+        ta switch work --git-profile pdonorio
+        # lower-level override if needed outside textsessions
+
+    defaults:
+      work:    paolo-paradex   # work Claude → paradex git identity by default
+      personal: pdonorio       # personal Claude → personal git identity by default
+
+    data_model:
+      description: |
+        Introduce a top-level git_profiles registry in profiles.yaml,
+        separate from the Claude profiles. Each Claude profile gains an
+        optional default_git_profile field replacing the inline signing block.
+
+      git_profiles_schema: |
+        git_profiles:
+          pdonorio:
+            name: "Paolo D'Onorio De Meo"
+            email: "p.donorio.demeo@gmail.com"
+            signing_key: ""                      # gpg key id, or omit for unsigned
+          paolo-paradex:
+            name: "Paolo (Paradex)"
+            email: "paolo@paradigm.co"
+            signing_key: ""
+
+      profile_schema_change: |
+        # Before (signing block inline on Profile):
+        work:
+          signing:
+            mode: gpg-sw
+            key: ABCD1234
+            name: "Paolo (Paradex)"
+            email: "paolo@paradigm.co"
+
+        # After (reference to a named git profile):
+        work:
+          default_git_profile: paolo-paradex
+
+      migration: |
+        Existing signing blocks are migrated automatically on first load:
+        extract name/email/key into a git_profiles entry, replace the
+        signing block with default_git_profile pointing to it.
+        Retain backward-compat read for one minor version, then drop.
+
+    new_cli: |
+      ta git-profile add <name> --email <email> [--signing-key <key>]
+      ta git-profile list
+      ta git-profile remove <name>
+      ta git-profile show <name>
+      ta switch <profile> [--git-profile <name>]   # override default
+
+    where:
+      primary: textsessions (ts new --git-profile)
+      foundation: textaccounts (git_profiles registry, ta switch override)
+      not_needed: standalone ta switch without textsessions is an edge case;
+                  the flag is a nice-to-have there
+
+    status: design_only — implement after H1/H2/H3
+
+# ---------------------------------------------------------------------------
+# Definition of done for v1.0.0
+# ---------------------------------------------------------------------------
+
+done_when:
+  - H1 squash complete, history starts from a single clean commit
+  - H2 all commits in final history attributed to pdonorio paperworlds identity
+  - H3 no Claude co-author lines in post-v1 commits
+  - F1 git_profiles registry exists; ta switch accepts --git-profile
+  - F1 textsessions ts new accepts --git-profile
+  - F1 default_git_profile on profiles replaces signing block
+  - all existing tests pass
+  - repo made public under github.com/Paperworlds/textaccounts

@@ -1,0 +1,11 @@
+.claude/
+.files/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+*.egg
+.pytest_cache/
+.memsearch/
