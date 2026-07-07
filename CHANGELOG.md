@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.8.1
+
+- security: `textaccounts show <profile>` now redacts the `CLAUDE_CODE_OAUTH_TOKEN` value when stdout is a TTY (a human ran it directly), printing `'<redacted>'` plus a hint to pipe to `source`. Piped use (`textaccounts show labs | source`) and the programmatic `env_for_profile` path are unchanged, so secrets stop leaking into terminal scrollback / shell history while activation still works. `core.show` gains a `redact` param; the CLI passes `redact=sys.stdout.isatty()`.
+- fix: `adopt-token` seeds new config dirs' `.claude.json` with `{"hasCompletedOnboarding": true}` instead of `{}`. Without the flag, Claude Code shows the "Select login method" welcome screen on first interactive launch even when a valid token is set — so `ts new --profile <token-profile>` landed on the login prompt. Future token profiles launch straight into the session.
+
 ## v0.8.0
 
 - BREAKING: storage root moves from `~/.textaccounts/` to `~/.local/paperworlds/textaccounts/`. `CONFIG_PATH`, `DEFAULT_PROFILES_DIR`, `GC_LOG_PATH`, and the shell-wrapper write target (`textaccounts install`) all follow.

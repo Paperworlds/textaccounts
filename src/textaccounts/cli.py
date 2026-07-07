@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess as _sp
+import sys
 from pathlib import Path
 
 import click
@@ -29,9 +30,9 @@ try:
         stderr=_sp.DEVNULL, text=True,
         cwd=Path(__file__).parent,
     ).strip()
-    _version_str = f"textaccounts, version {__version__} ({_git_hash})"
+    _version_str = f"{__version__} ({_git_hash})"
 except Exception:
-    _version_str = f"textaccounts, version {__version__}"
+    _version_str = f"{__version__}"
 
 
 def _complete_profile_names(ctx, param, incomplete):
@@ -246,7 +247,7 @@ def alias(profile_name: str, alias: str, remove: bool) -> None:
 def show(name: str, shell_name: str) -> None:
     """Print the shell command to activate a profile (used by shell integration)."""
     registry = load_registry()
-    line = core.show(name, registry, shell=shell_name)
+    line = core.show(name, registry, shell=shell_name, redact=sys.stdout.isatty())
     if name != "default":
         save_registry(registry)
     click.echo(line)

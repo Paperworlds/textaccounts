@@ -97,7 +97,11 @@ def adopt_token(name: str, dest: Path, token: str, registry: ProfileRegistry) ->
     dest.mkdir(parents=True, exist_ok=True)
     claude_json = dest / ".claude.json"
     if not claude_json.exists():
-        claude_json.write_text(_json.dumps({}))
+        # Seed the onboarding flag so the first interactive launch goes straight
+        # to the session instead of the "Select login method" welcome screen —
+        # Claude Code gates that screen on hasCompletedOnboarding even when a
+        # valid CLAUDE_CODE_OAUTH_TOKEN is present.
+        claude_json.write_text(_json.dumps({"hasCompletedOnboarding": True}))
     ok = _token_keychain_write(name, token)
     if not ok:
         raise click.ClickException("Failed to write token to Keychain.")
@@ -424,7 +428,7 @@ def compute_env(profile: "Profile") -> "dict[str, str | None]":
     return env
 
 
-def show(name: str, registry: ProfileRegistry, shell: str = "fish") -> str:
+def show(name: str, registry: ProfileRegistry, shell: str = "fish", redact: bool = False) -> str:
     def _unset(*vars: str) -> str:
         if shell == "fish":
             return "\n".join(f"set -e {v}" for v in vars)
@@ -449,10 +453,27 @@ def show(name: str, registry: ProfileRegistry, shell: str = "fish") -> str:
     pairs = [(k, v) for k, v in env.items() if v is not None]
     unset_keys = [k for k, v in env.items() if v is None]
 
+    # Redact the secret when the caller is a human at a TTY (not piping to
+    # `source`). The masked value is shell-valid but deliberately useless, so a
+    # copy-paste fails loudly and the human reaches for the documented pipe.
+    notice = ""
+    if redact:
+        masked: list[tuple[str, str]] = []
+        for k, v in pairs:
+            if k == "CLAUDE_CODE_OAUTH_TOKEN":
+                masked.append((k, "'<redacted>'"))
+                notice = (
+                    f"# token-auth profile {name!r}: secret hidden because output is a TTY.\n"
+                    f"# to activate, pipe to your shell:  textaccounts show {name} | source\n"
+                )
+            else:
+                masked.append((k, v))
+        pairs = masked
+
     out = _set(pairs)
     if unset_keys:
         out += "\n" + _unset(*unset_keys)
-    return out
+    return notice + out if notice else out
 
 
 def get_status(registry: ProfileRegistry) -> dict:

@@ -88,6 +88,20 @@ def test_adopt_token_creates_profile_and_writes_keychain(tmp_path):
     mock_write.assert_called_once_with("tok", "secret")
 
 
+def test_adopt_token_seeds_onboarding_flag(tmp_path):
+    import json
+    from textaccounts.core import adopt_token
+    registry, _ = make_registry(tmp_path)
+    dest = tmp_path / "claude-tok"
+
+    with patch("textaccounts.core._token_keychain_write", return_value=True):
+        adopt_token("tok", dest, "secret", registry)
+
+    # Seeded .claude.json must skip the onboarding/login screen on first launch.
+    seeded = json.loads((dest / ".claude.json").read_text())
+    assert seeded.get("hasCompletedOnboarding") is True
+
+
 def test_adopt_token_rejects_duplicate_name(tmp_path):
     from textaccounts.core import adopt_token
     registry, _ = make_registry(tmp_path)
@@ -576,6 +590,40 @@ def test_show_token_profile_emits_both_env_vars(tmp_path):
     assert str(p_dir) in line
     assert "CLAUDE_CODE_OAUTH_TOKEN" in line
     assert "mytoken123" in line
+
+
+def test_show_token_profile_redacts_secret_when_requested(tmp_path):
+    registry, _ = make_registry(tmp_path)
+    p_dir = tmp_path / "claude-svc"
+    p_dir.mkdir()
+    make_claude_json(p_dir)
+    registry.profiles["svc"] = Profile(name="svc", path=p_dir, email="", auth_method="token")
+
+    with patch("textaccounts.core._token_keychain_read", return_value="mytoken123"):
+        line = show("svc", registry, redact=True)
+
+    # Secret never appears; config dir + var name + activation hint do.
+    assert "mytoken123" not in line
+    assert "<redacted>" in line
+    assert "CLAUDE_CONFIG_DIR" in line
+    assert str(p_dir) in line
+    assert "CLAUDE_CODE_OAUTH_TOKEN" in line
+    assert "textaccounts show svc | source" in line
+
+
+def test_show_redact_is_noop_for_nontoken_profile(tmp_path):
+    registry, _ = make_registry(tmp_path)
+    p_dir = tmp_path / "claude-sub"
+    p_dir.mkdir()
+    make_claude_json(p_dir)
+    registry.profiles["sub"] = Profile(name="sub", path=p_dir, email="")
+
+    plain = show("sub", registry, redact=False)
+    redacted = show("sub", registry, redact=True)
+
+    # No token to hide → output identical, no redaction notice.
+    assert plain == redacted
+    assert "<redacted>" not in redacted
 
 
 def test_show_token_profile_raises_when_no_keychain_entry(tmp_path):
